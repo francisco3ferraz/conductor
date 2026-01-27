@@ -1,0 +1,39 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Raft data
+/raft-data/
+*.db
+
+# Logs
+*.log
+
+# Environment
+.env
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
