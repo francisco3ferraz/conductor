@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package raft;
+
+option go_package = "github.com/francisco3ferraz/conductor/api/proto/raft";
+
+import "scheduler.proto";
+
+// Raft FSM commands for state replication
+message Command {
+  string type = 1;  // "submit_job", "assign_job", "complete_job", "register_worker", "remove_worker"
+  bytes payload = 2;
+}
+
+// Command payloads
+message SubmitJobCommand {
+  scheduler.Job job = 1;
+}
+
+message AssignJobCommand {
+  string job_id = 1;
+  string worker_id = 2;
+}
+
+message CompleteJobCommand {
+  string job_id = 1;
+  scheduler.JobResult result = 2;
+}
+
+message RegisterWorkerCommand {
+  string worker_id = 1;
+  string address = 2;
+  int32 max_concurrent_jobs = 3;
+}
+
+message RemoveWorkerCommand {
+  string worker_id = 1;
+  string reason = 2;
+}
+
+// Snapshot data
+message Snapshot {
+  map<string, scheduler.Job> jobs = 1;
+  map<string, WorkerInfo> workers = 2;
+  int64 last_job_id = 3;
+}
+
+message WorkerInfo {
+  string id = 1;
+  string address = 2;
+  int32 max_concurrent_jobs = 3;
+  int32 active_jobs = 4;
+  int64 last_heartbeat = 5;  // Unix timestamp
+  string status = 6;          // "active", "inactive", "failed"
+}

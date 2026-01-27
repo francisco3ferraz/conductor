@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package worker;
+
+option go_package = "github.com/francisco3ferraz/conductor/api/proto/worker";
+
+import "google/protobuf/timestamp.proto";
+import "scheduler.proto";
+
+// WorkerService handles worker registration and job execution
+service WorkerService {
+  rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc AssignJob(AssignJobRequest) returns (AssignJobResponse);
+  rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
+}
+
+// Worker registration
+message RegisterWorkerRequest {
+  string worker_id = 1;
+  string address = 2;
+  int32 max_concurrent_jobs = 3;
+  map<string, string> capabilities = 4;  // Worker capabilities/tags
+}
+
+message RegisterWorkerResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Heartbeat
+message HeartbeatRequest {
+  string worker_id = 1;
+  WorkerStats stats = 2;
+}
+
+message HeartbeatResponse {
+  bool ack = 1;
+  int32 assigned_jobs_count = 2;  // Number of jobs assigned to this worker
+}
+
+message WorkerStats {
+  int32 active_jobs = 1;
+  int32 completed_jobs = 2;
+  int32 failed_jobs = 3;
+  double cpu_usage = 4;
+  double memory_usage = 5;
+}
+
+// Job assignment from master to worker
+message AssignJobRequest {
+  string worker_id = 1;
+  scheduler.Job job = 2;
+}
+
+message AssignJobResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+// Report job result from worker to master
+message ReportResultRequest {
+  string job_id = 1;
+  string worker_id = 2;
+  scheduler.JobResult result = 3;
+}
+
+message ReportResultResponse {
+  bool success = 1;
+  string message = 2;
+}

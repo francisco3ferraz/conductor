@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package scheduler;
+
+option go_package = "github.com/francisco3ferraz/conductor/api/proto/scheduler";
+
+import "google/protobuf/timestamp.proto";
+
+// MasterService handles job submission and status queries
+service MasterService {
+  rpc SubmitJob(SubmitJobRequest) returns (SubmitJobResponse);
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+}
+
+// Job submission request
+message SubmitJobRequest {
+  string type = 1;           // Job type: "image_processing", "web_scraping", "data_analysis"
+  bytes payload = 2;         // Job payload
+  int32 priority = 3;        // Job priority (higher = more important)
+  int32 max_retries = 4;     // Maximum retry attempts
+  int64 timeout_seconds = 5; // Job timeout in seconds
+}
+
+message SubmitJobResponse {
+  string job_id = 1;
+  string status = 2;
+  string message = 3;
+}
+
+// Job status query
+message GetJobStatusRequest {
+  string job_id = 1;
+}
+
+message GetJobStatusResponse {
+  Job job = 1;
+}
+
+// List jobs
+message ListJobsRequest {
+  string status_filter = 1;  // Filter by status (optional)
+  int32 limit = 2;           // Maximum number of jobs to return
+  int32 offset = 3;          // Pagination offset
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+  int32 total = 2;
+}
+
+// Cancel job
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+message CancelJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Job model
+message Job {
+  string id = 1;
+  string type = 2;
+  bytes payload = 3;
+  int32 priority = 4;
+  string status = 5;          // "pending", "assigned", "running", "completed", "failed", "cancelled"
+  string assigned_to = 6;     // Worker ID
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp completed_at = 9;
+  JobResult result = 10;
+  int32 retry_count = 11;
+  int32 max_retries = 12;
+  string error_message = 13;
+}
+
+message JobResult {
+  bool success = 1;
+  bytes output = 2;
+  string error = 3;
+  int64 duration_ms = 4;
+}
