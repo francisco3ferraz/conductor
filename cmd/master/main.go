@@ -3,15 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
+	"github.com/francisco3ferraz/conductor/internal/rpc"
 	"github.com/francisco3ferraz/conductor/internal/storage"
+	"google.golang.org/grpc"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -78,6 +82,25 @@ func main() {
 		logger.Info("Leader elected", zap.String("leader", raftNode.Leader()))
 	}
 
+	// Create gRPC server
+	grpcServer := grpc.NewServer()
+	masterSvc := rpc.NewMasterServer(raftNode, fsm, logger)
+	proto.RegisterMasterServiceServer(grpcServer, masterSvc)
+
+	// Start gRPC server
+	grpcAddr := fmt.Sprintf(":%d", cfg.GRPC.MasterPort)
+	grpcListener, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		logger.Fatal("Failed to create gRPC listener", zap.Error(err))
+	}
+
+	go func() {
+		logger.Info("Starting gRPC server", zap.String("addr", grpcAddr))
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			logger.Error("gRPC server error", zap.Error(err))
+		}
+	}()
+
 	// Create HTTP server for health checks
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler(logger))
@@ -109,6 +132,10 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Stop gRPC server
+	grpcServer.GracefulStop()
+
+	// Stop HTTP server
 	if err := httpServer.Shutdown(ctx); err != nil {
 		logger.Error("HTTP server shutdown error", zap.Error(err))
 	}
