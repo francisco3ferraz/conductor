@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/francisco3ferraz/conductor/internal/config"
+	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 
 	"go.uber.org/zap"
@@ -43,6 +44,39 @@ func main() {
 	defer store.Close()
 
 	logger.Info("Storage initialized", zap.String("type", "memory"))
+
+	// Initialize Raft FSM
+	fsm := consensus.NewFSM(logger)
+
+	// Initialize Raft node
+	raftConfig := &consensus.Config{
+		NodeID:            cfg.Cluster.NodeID,
+		BindAddr:          cfg.Cluster.BindAddr,
+		DataDir:           cfg.Cluster.RaftDir,
+		Bootstrap:         true, // TODO: make this configurable for multi-node setups
+		HeartbeatTimeout:  cfg.Raft.HeartbeatTimeout,
+		ElectionTimeout:   cfg.Raft.ElectionTimeout,
+		SnapshotInterval:  cfg.Raft.SnapshotInterval,
+		SnapshotThreshold: cfg.Raft.SnapshotThreshold,
+	}
+
+	raftNode, err := consensus.NewRaftNode(raftConfig, fsm, logger)
+	if err != nil {
+		logger.Fatal("Failed to create Raft node", zap.Error(err))
+	}
+	defer raftNode.Shutdown()
+
+	logger.Info("Raft node initialized",
+		zap.String("node_id", raftConfig.NodeID),
+		zap.String("bind_addr", raftConfig.BindAddr),
+	)
+
+	// Wait for leader election
+	if err := raftNode.WaitForLeader(30 * time.Second); err != nil {
+		logger.Warn("No leader elected yet", zap.Error(err))
+	} else {
+		logger.Info("Leader elected", zap.String("leader", raftNode.Leader()))
+	}
 
 	// Create HTTP server for health checks
 	mux := http.NewServeMux()
