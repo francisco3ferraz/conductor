@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package worker;
+package proto;
 
-option go_package = "github.com/francisco3ferraz/conductor/api/proto/worker";
+option go_package = "github.com/francisco3ferraz/conductor/api/proto";
 
 import "google/protobuf/timestamp.proto";
-import "scheduler.proto";
+import "api/proto/scheduler.proto";
 
 // WorkerService handles worker registration and job execution
 service WorkerService {
@@ -50,7 +50,7 @@ message WorkerStats {
 // Job assignment from master to worker
 message AssignJobRequest {
   string worker_id = 1;
-  scheduler.Job job = 2;
+  Job job = 2;
 }
 
 message AssignJobResponse {
@@ -62,7 +62,7 @@ message AssignJobResponse {
 message ReportResultRequest {
   string job_id = 1;
   string worker_id = 2;
-  scheduler.JobResult result = 3;
+  JobResult result = 3;
 }
 
 message ReportResultResponse {

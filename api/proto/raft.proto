@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package raft;
+package proto;
 
-option go_package = "github.com/francisco3ferraz/conductor/api/proto/raft";
+option go_package = "github.com/francisco3ferraz/conductor/api/proto";
 
-import "scheduler.proto";
+import "api/proto/scheduler.proto";
 
 // Raft FSM commands for state replication
 message Command {
@@ -14,7 +14,7 @@ message Command {
 
 // Command payloads
 message SubmitJobCommand {
-  scheduler.Job job = 1;
+  Job job = 1;
 }
 
 message AssignJobCommand {
@@ -24,7 +24,7 @@ message AssignJobCommand {
 
 message CompleteJobCommand {
   string job_id = 1;
-  scheduler.JobResult result = 2;
+  JobResult result = 2;
 }
 
 message RegisterWorkerCommand {
@@ -40,7 +40,7 @@ message RemoveWorkerCommand {
 
 // Snapshot data
 message Snapshot {
-  map<string, scheduler.Job> jobs = 1;
+  map<string, Job> jobs = 1;
   map<string, WorkerInfo> workers = 2;
   int64 last_job_id = 3;
 }

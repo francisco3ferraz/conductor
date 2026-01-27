@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package scheduler;
+package proto;
 
-option go_package = "github.com/francisco3ferraz/conductor/api/proto/scheduler";
+option go_package = "github.com/francisco3ferraz/conductor/api/proto";
 
 import "google/protobuf/timestamp.proto";
 
