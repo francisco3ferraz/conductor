@@ -14,6 +14,7 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/rpc"
+	"github.com/francisco3ferraz/conductor/internal/scheduler"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"google.golang.org/grpc"
 
@@ -100,6 +101,17 @@ func main() {
 			logger.Error("gRPC server error", zap.Error(err))
 		}
 	}()
+
+	// Create and start scheduler
+	sched := scheduler.NewScheduler(raftNode, fsm, logger)
+
+	// Start scheduler in background
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	defer schedCancel()
+
+	go sched.Start(schedCtx)
+
+	logger.Info("Scheduler started")
 
 	// Create HTTP server for health checks
 	mux := http.NewServeMux()

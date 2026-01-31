@@ -3,13 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	proto "github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/config"
+	"github.com/francisco3ferraz/conductor/internal/executor"
+	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/rpc"
+	"google.golang.org/grpc"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -19,7 +25,7 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load("")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		fmt.Printf("Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -34,11 +40,70 @@ func main() {
 	logger.Info("Starting worker node",
 		zap.String("worker_id", cfg.Worker.WorkerID),
 		zap.String("master_addr", cfg.Worker.MasterAddr),
-		zap.Int("max_concurrent_jobs", cfg.Worker.MaxConcurrentJobs),
+		zap.Int("max_jobs", cfg.Worker.MaxConcurrentJobs),
 	)
 
-	// TODO: Connect to master (will be implemented in Phase 3)
-	logger.Info("Worker initialized", zap.String("status", "ready"))
+	// Create job executor
+	exec := executor.NewExecutor(cfg.Worker.WorkerID, logger)
+
+	// Create worker client
+	workerClient, err := rpc.NewWorkerClient(
+		cfg.Worker.WorkerID,
+		cfg.Worker.MasterAddr,
+		exec,
+		logger,
+	)
+	if err != nil {
+		logger.Fatal("Failed to create worker client", zap.Error(err))
+	}
+	defer workerClient.Close()
+
+	// Register with master
+	ctx := context.Background()
+	if err := workerClient.Register(ctx, int32(cfg.Worker.MaxConcurrentJobs)); err != nil {
+		logger.Fatal("Failed to register with master", zap.Error(err))
+	}
+
+	// Start heartbeat goroutine
+	heartbeatCtx, heartbeatCancel := context.WithCancel(ctx)
+	defer heartbeatCancel()
+
+	go workerClient.StartHeartbeat(heartbeatCtx, cfg.Worker.HeartbeatInterval)
+
+	// Create result reporter function
+	resultReporter := func(ctx context.Context, jobID string, result *job.Result) error {
+		logger.Info("Job execution completed",
+			zap.String("job_id", jobID),
+			zap.Bool("success", result.Success),
+			zap.Int64("duration_ms", result.DurationMs),
+		)
+		// Worker has completed the job
+		// For now we just log completion
+		// Full implementation would report back to master
+		return nil
+	}
+
+	// Create and start worker gRPC server
+	grpcServer := grpc.NewServer()
+	workerSvc := rpc.NewWorkerServer(cfg.Worker.WorkerID, exec, resultReporter, logger)
+	proto.RegisterWorkerServiceServer(grpcServer, workerSvc)
+
+	workerAddr := fmt.Sprintf(":%d", cfg.GRPC.WorkerPort)
+	grpcListener, err := net.Listen("tcp", workerAddr)
+	if err != nil {
+		logger.Fatal("Failed to create gRPC listener", zap.Error(err))
+	}
+
+	go func() {
+		logger.Info("Starting gRPC server", zap.String("addr", workerAddr))
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			logger.Error("gRPC server error", zap.Error(err))
+		}
+	}()
+
+	// Register worker with scheduler (including gRPC address)
+	// We need to expose the scheduler registration endpoint
+	// For now, we'll register via direct scheduler access (to be implemented)
 
 	// Create HTTP server for health checks
 	mux := http.NewServeMux()
@@ -52,30 +117,52 @@ func main() {
 
 	// Start HTTP server
 	go func() {
-		logger.Info("Starting HTTP server", zap.String("addr", httpServer.Addr))
+		logger.Info("Starting HTTP server", zap.String("addr", ":8081"))
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error", zap.Error(err))
 		}
 	}()
 
-	// Wait for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
 	logger.Info("Worker node is running. Press Ctrl+C to stop.")
-	<-sigChan
+
+	// Wait for interrupt signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
 
 	// Graceful shutdown
 	logger.Info("Shutting down worker node...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	if err := httpServer.Shutdown(ctx); err != nil {
+	// Stop heartbeat
+	heartbeatCancel()
+
+	// Stop HTTP server
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", zap.Error(err))
 	}
 
-	logger.Info("Worker node stopped")
+	// Close worker client
+	workerClient.Close()
+
+	// Close Raft
+	logger.Info("Shutdown complete")
+}
+
+func healthHandler(logger *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}
+}
+
+func readyHandler(logger *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("READY"))
+	}
 }
 
 func initLogger(level string) (*zap.Logger, error) {
@@ -96,20 +183,5 @@ func parseLogLevel(level string) zapcore.Level {
 		return zapcore.ErrorLevel
 	default:
 		return zapcore.InfoLevel
-	}
-}
-
-func healthHandler(logger *zap.Logger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	}
-}
-
-func readyHandler(logger *zap.Logger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Add actual readiness checks (connection to master, etc.)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("READY"))
 	}
 }
