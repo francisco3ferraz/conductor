@@ -4,8 +4,8 @@ import (
 	"context"
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
-	"github.com/francisco3ferraz/conductor/internal/executor"
 	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.uber.org/zap"
 )
 
@@ -13,13 +13,13 @@ import (
 type WorkerServer struct {
 	proto.UnimplementedWorkerServiceServer
 	workerID       string
-	executor       *executor.Executor
+	executor       *worker.Executor
 	resultReporter func(context.Context, string, *job.Result) error
 	logger         *zap.Logger
 }
 
 // NewWorkerServer creates a new worker gRPC server
-func NewWorkerServer(workerID string, exec *executor.Executor, resultReporter func(context.Context, string, *job.Result) error, logger *zap.Logger) *WorkerServer {
+func NewWorkerServer(workerID string, exec *worker.Executor, resultReporter func(context.Context, string, *job.Result) error, logger *zap.Logger) *WorkerServer {
 	return &WorkerServer{
 		workerID:       workerID,
 		executor:       exec,

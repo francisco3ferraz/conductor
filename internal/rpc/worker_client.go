@@ -6,8 +6,8 @@ import (
 	"time"
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
-	"github.com/francisco3ferraz/conductor/internal/executor"
 	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,7 +19,7 @@ type WorkerClient struct {
 	masterAddr string
 	Client     proto.MasterServiceClient // Exported for result reporting
 	conn       *grpc.ClientConn
-	executor   *executor.Executor
+	executor   *worker.Executor
 	logger     *zap.Logger
 
 	activeJobs     int32
@@ -28,7 +28,7 @@ type WorkerClient struct {
 }
 
 // NewWorkerClient creates a new worker client
-func NewWorkerClient(workerID, masterAddr string, executor *executor.Executor, logger *zap.Logger) (*WorkerClient, error) {
+func NewWorkerClient(workerID, masterAddr string, executor *worker.Executor, logger *zap.Logger) (*WorkerClient, error) {
 	// Connect to master
 	conn, err := grpc.NewClient(masterAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {

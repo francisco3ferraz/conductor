@@ -7,9 +7,7 @@ import (
 	"log"
 	"time"
 
-	proto "github.com/francisco3ferraz/conductor/api/proto"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/francisco3ferraz/conductor/pkg/client"
 )
 
 func main() {
@@ -20,64 +18,54 @@ func main() {
 	payload := flag.String("payload", "test data", "Job payload")
 	flag.Parse()
 
-	// Connect to master
-	conn, err := grpc.NewClient(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Create client
+	c, err := client.NewClient(*addr)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer conn.Close()
+	defer c.Close()
 
-	client := proto.NewMasterServiceClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	switch *action {
 	case "submit":
-		resp, err := client.SubmitJob(ctx, &proto.SubmitJobRequest{
-			Type:       *jobType,
-			Payload:    []byte(*payload),
-			Priority:   5,
-			MaxRetries: 3,
-		})
+		jobID, err := c.SubmitJob(ctx, *jobType, []byte(*payload), 5, 3)
 		if err != nil {
 			log.Fatalf("SubmitJob failed: %v", err)
 		}
-		fmt.Printf("Job submitted: %s\n", resp.JobId)
-		fmt.Printf("Status: %s\n", resp.Status)
-		fmt.Printf("Message: %s\n", resp.Message)
+		fmt.Printf("Job submitted: %s\n", jobID)
+		fmt.Printf("Status: success\n")
+		fmt.Printf("Message: Job submitted successfully\n")
+		fmt.Printf("Job ID: %s\n", jobID)
 
 	case "status":
 		if *jobID == "" {
 			log.Fatal("Job ID required for status")
 		}
-		resp, err := client.GetJobStatus(ctx, &proto.GetJobStatusRequest{
-			JobId: *jobID,
-		})
+		job, err := c.GetJobStatus(ctx, *jobID)
 		if err != nil {
 			log.Fatalf("GetJobStatus failed: %v", err)
 		}
-		fmt.Printf("Job: %s\n", resp.Job.Id)
-		fmt.Printf("Type: %s\n", resp.Job.Type)
-		fmt.Printf("Status: %s\n", resp.Job.Status)
-		fmt.Printf("Priority: %d\n", resp.Job.Priority)
-		fmt.Printf("Created: %v\n", resp.Job.CreatedAt.AsTime())
-		if resp.Job.AssignedTo != "" {
-			fmt.Printf("Assigned to: %s\n", resp.Job.AssignedTo)
+		fmt.Printf("Job: %s\n", job.Id)
+		fmt.Printf("Type: %s\n", job.Type)
+		fmt.Printf("Status: %s\n", job.Status)
+		fmt.Printf("Priority: %d\n", job.Priority)
+		fmt.Printf("Created: %v\n", job.CreatedAt.AsTime())
+		if job.AssignedTo != "" {
+			fmt.Printf("Assigned to: %s\n", job.AssignedTo)
 		}
-		if resp.Job.ErrorMessage != "" {
-			fmt.Printf("Error: %s\n", resp.Job.ErrorMessage)
+		if job.ErrorMessage != "" {
+			fmt.Printf("Error: %s\n", job.ErrorMessage)
 		}
 
 	case "list":
-		resp, err := client.ListJobs(ctx, &proto.ListJobsRequest{
-			Limit:  10,
-			Offset: 0,
-		})
+		jobs, total, err := c.ListJobs(ctx, 10, 0)
 		if err != nil {
 			log.Fatalf("ListJobs failed: %v", err)
 		}
-		fmt.Printf("Total jobs: %d\n", resp.Total)
-		for i, job := range resp.Jobs {
+		fmt.Printf("Total jobs: %d\n", total)
+		for i, job := range jobs {
 			fmt.Printf("%d. ID=%s Type=%s Status=%s Priority=%d\n",
 				i+1, job.Id, job.Type, job.Status, job.Priority)
 		}
@@ -86,14 +74,12 @@ func main() {
 		if *jobID == "" {
 			log.Fatal("Job ID required for cancel")
 		}
-		resp, err := client.CancelJob(ctx, &proto.CancelJobRequest{
-			JobId: *jobID,
-		})
+		err := c.CancelJob(ctx, *jobID)
 		if err != nil {
 			log.Fatalf("CancelJob failed: %v", err)
 		}
-		fmt.Printf("Success: %v\n", resp.Success)
-		fmt.Printf("Message: %s\n", resp.Message)
+		fmt.Printf("Success: true\n")
+		fmt.Printf("Message: Job cancelled successfully\n")
 
 	default:
 		log.Fatalf("Unknown action: %s", *action)

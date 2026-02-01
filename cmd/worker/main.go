@@ -12,9 +12,9 @@ import (
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/config"
-	"github.com/francisco3ferraz/conductor/internal/executor"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/rpc"
+	"github.com/francisco3ferraz/conductor/internal/worker"
 	"google.golang.org/grpc"
 
 	"go.uber.org/zap"
@@ -44,7 +44,7 @@ func main() {
 	)
 
 	// Create job executor
-	exec := executor.NewExecutor(cfg.Worker.WorkerID, logger)
+	exec := worker.NewExecutor(cfg.Worker.WorkerID, logger)
 
 	// Create worker client
 	workerClient, err := rpc.NewWorkerClient(
