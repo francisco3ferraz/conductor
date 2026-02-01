@@ -20,6 +20,7 @@ type WorkerClient struct {
 	Client     proto.MasterServiceClient // Exported for result reporting
 	conn       *grpc.ClientConn
 	executor   *worker.Executor
+	heartbeat  *worker.HeartbeatSender
 	logger     *zap.Logger
 
 	activeJobs     int32
@@ -37,14 +38,25 @@ func NewWorkerClient(workerID, masterAddr string, executor *worker.Executor, log
 
 	client := proto.NewMasterServiceClient(conn)
 
-	return &WorkerClient{
+	wc := &WorkerClient{
 		workerID:   workerID,
 		masterAddr: masterAddr,
 		Client:     client,
 		conn:       conn,
 		executor:   executor,
 		logger:     logger,
-	}, nil
+	}
+
+	// Create heartbeat sender
+	wc.heartbeat = worker.NewHeartbeatSender(
+		workerID,
+		conn,
+		5*time.Second,
+		wc.GetStats,
+		logger,
+	)
+
+	return wc, nil
 }
 
 // Close closes the connection to master
@@ -93,53 +105,12 @@ func (w *WorkerClient) Register(ctx context.Context, maxJobs int32, address stri
 
 // StartHeartbeat starts sending periodic heartbeats to master
 func (w *WorkerClient) StartHeartbeat(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			w.logger.Info("Stopping heartbeat", zap.String("worker_id", w.workerID))
-			return
-		case <-ticker.C:
-			if err := w.sendHeartbeat(ctx); err != nil {
-				w.logger.Error("Heartbeat failed", zap.Error(err))
-			}
-		}
-	}
+	w.heartbeat.Start(ctx)
 }
 
-// sendHeartbeat sends a single heartbeat to master
-func (w *WorkerClient) sendHeartbeat(ctx context.Context) error {
-	// Create a worker service client from the master connection
-	workerSvcClient := proto.NewWorkerServiceClient(w.conn)
-
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	active, completed, failed := w.GetStats()
-
-	resp, err := workerSvcClient.Heartbeat(ctx, &proto.HeartbeatRequest{
-		WorkerId: w.workerID,
-		Stats: &proto.WorkerStats{
-			ActiveJobs:    active,
-			CompletedJobs: completed,
-			FailedJobs:    failed,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("heartbeat failed: %w", err)
-	}
-
-	if !resp.Ack {
-		w.logger.Warn("Heartbeat not acknowledged")
-	}
-
-	w.logger.Debug("Heartbeat sent",
-		zap.String("worker_id", w.workerID),
-		zap.Int32("active_jobs", active),
-	)
-	return nil
+// StopHeartbeat stops the heartbeat sender
+func (w *WorkerClient) StopHeartbeat() {
+	w.heartbeat.Stop()
 }
 
 // ExecuteJob executes a job and reports the result to master

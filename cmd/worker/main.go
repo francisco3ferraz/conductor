@@ -58,6 +58,14 @@ func main() {
 	}
 	defer workerClient.Close()
 
+	// Create worker manager
+	mgr := worker.NewManager(
+		cfg.Worker.WorkerID,
+		exec,
+		nil, // heartbeat is managed by workerClient
+		logger,
+	)
+
 	// Determine worker's gRPC address to advertise (use WORKER_ADDR env var or default)
 	advertiseAddr := fmt.Sprintf("localhost:%d", cfg.GRPC.WorkerPort)
 
@@ -72,6 +80,12 @@ func main() {
 	defer heartbeatCancel()
 
 	go workerClient.StartHeartbeat(heartbeatCtx, cfg.Worker.HeartbeatInterval)
+
+	// Start worker manager
+	if err := mgr.Start(heartbeatCtx); err != nil {
+		logger.Fatal("Failed to start worker manager", zap.Error(err))
+	}
+	defer mgr.Stop()
 
 	// Create result reporter function that sends results back to master
 	resultReporter := func(ctx context.Context, jobID string, result *job.Result) error {

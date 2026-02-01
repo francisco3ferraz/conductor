@@ -8,18 +8,9 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/storage"
+	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.uber.org/zap"
 )
-
-// WorkerInfo tracks worker state
-type WorkerInfo struct {
-	ID                string
-	Address           string
-	MaxConcurrentJobs int
-	ActiveJobs        int
-	LastHeartbeat     time.Time
-	Status            string // "active", "inactive"
-}
 
 // Scheduler assigns jobs to workers
 type Scheduler struct {
@@ -28,8 +19,8 @@ type Scheduler struct {
 	applier  *consensus.ApplyCommand
 	logger   *zap.Logger
 
-	workers map[string]*WorkerInfo
-	mu      sync.RWMutex
+	registry *worker.Registry
+	mu       sync.RWMutex
 
 	stopCh chan struct{}
 }
@@ -41,7 +32,7 @@ func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.
 		fsm:      fsm,
 		applier:  consensus.NewApplyCommand(raftNode),
 		logger:   logger,
-		workers:  make(map[string]*WorkerInfo),
+		registry: worker.NewRegistry(),
 		stopCh:   make(chan struct{}),
 	}
 }
@@ -138,17 +129,8 @@ func (s *Scheduler) schedulePendingJobs() {
 // sendJobToWorker sends a job to a worker via gRPC
 // RegisterWorker registers a new worker
 func (s *Scheduler) RegisterWorker(id, address string, maxJobs int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.workers[id] = &WorkerInfo{
-		ID:                id,
-		Address:           address,
-		MaxConcurrentJobs: maxJobs,
-		ActiveJobs:        0,
-		LastHeartbeat:     time.Now(),
-		Status:            "active",
-	}
+	// Register in local registry
+	s.registry.Register(id, address, maxJobs)
 
 	// Also register in Raft FSM
 	workerInfo := &storage.WorkerInfo{
@@ -170,22 +152,12 @@ func (s *Scheduler) RegisterWorker(id, address string, maxJobs int) {
 
 // UpdateHeartbeat updates worker's last heartbeat time
 func (s *Scheduler) UpdateHeartbeat(workerID string, activeJobs int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if worker, ok := s.workers[workerID]; ok {
-		worker.LastHeartbeat = time.Now()
-		worker.ActiveJobs = activeJobs
-		worker.Status = "active"
-	}
+	s.registry.UpdateHeartbeat(workerID, activeJobs)
 }
 
 // RemoveWorker removes a worker
 func (s *Scheduler) RemoveWorker(workerID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.workers, workerID)
+	s.registry.Unregister(workerID)
 
 	// Remove from Raft FSM
 	if err := s.applier.RemoveWorker(workerID); err != nil {
@@ -196,30 +168,16 @@ func (s *Scheduler) RemoveWorker(workerID string) {
 }
 
 // ListWorkers returns all registered workers
-func (s *Scheduler) ListWorkers() []*WorkerInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	workers := make([]*WorkerInfo, 0, len(s.workers))
-	for _, w := range s.workers {
-		workers = append(workers, w)
-	}
-	return workers
+func (s *Scheduler) ListWorkers() []*worker.WorkerInfo {
+	return s.registry.List()
 }
 
 // CheckWorkerHealth checks for inactive workers and marks them
 func (s *Scheduler) CheckWorkerHealth(timeout time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now()
-	for _, worker := range s.workers {
-		if now.Sub(worker.LastHeartbeat) > timeout {
-			worker.Status = "inactive"
-			s.logger.Warn("Worker marked inactive",
-				zap.String("worker_id", worker.ID),
-				zap.Duration("since_heartbeat", now.Sub(worker.LastHeartbeat)),
-			)
-		}
+	inactive := s.registry.MarkInactive(timeout)
+	for _, workerID := range inactive {
+		s.logger.Warn("Worker marked inactive",
+			zap.String("worker_id", workerID),
+		)
 	}
 }

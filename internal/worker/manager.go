@@ -28,8 +28,10 @@ func NewManager(id string, executor *Executor, heartbeat *HeartbeatSender, logge
 func (m *Manager) Start(ctx context.Context) error {
 	m.logger.Info("Worker manager starting", zap.String("worker_id", m.id))
 
-	// Start heartbeat sender
-	go m.heartbeat.Start(ctx)
+	// Start heartbeat sender (if provided)
+	if m.heartbeat != nil {
+		go m.heartbeat.Start(ctx)
+	}
 
 	m.logger.Info("Worker manager started", zap.String("worker_id", m.id))
 	return nil
@@ -39,8 +41,10 @@ func (m *Manager) Start(ctx context.Context) error {
 func (m *Manager) Stop() error {
 	m.logger.Info("Worker manager stopping", zap.String("worker_id", m.id))
 
-	// Stop heartbeat
-	m.heartbeat.Stop()
+	// Stop heartbeat (if provided)
+	if m.heartbeat != nil {
+		m.heartbeat.Stop()
+	}
 
 	m.logger.Info("Worker manager stopped", zap.String("worker_id", m.id))
 	return nil
