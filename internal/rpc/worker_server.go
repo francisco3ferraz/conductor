@@ -40,6 +40,9 @@ func (w *WorkerServer) AssignJob(ctx context.Context, req *proto.AssignJobReques
 
 	// Execute job in goroutine
 	go func() {
+		// Mark job as running (start it)
+		j.Start()
+
 		// Execute the job
 		result := w.executor.Execute(context.Background(), j)
 

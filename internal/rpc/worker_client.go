@@ -17,7 +17,7 @@ import (
 type WorkerClient struct {
 	workerID   string
 	masterAddr string
-	Client     proto.MasterServiceClient  // Exported for result reporting
+	Client     proto.MasterServiceClient // Exported for result reporting
 	conn       *grpc.ClientConn
 	executor   *executor.Executor
 	logger     *zap.Logger
@@ -52,16 +52,42 @@ func (w *WorkerClient) Close() error {
 	return w.conn.Close()
 }
 
+// GetConn returns the gRPC connection (for advanced usage)
+func (w *WorkerClient) GetConn() *grpc.ClientConn {
+	return w.conn
+}
+
 // Register registers the worker with the master
-func (w *WorkerClient) Register(ctx context.Context, maxJobs int32) error {
+func (w *WorkerClient) Register(ctx context.Context, maxJobs int32, address string) error {
 	w.logger.Info("Registering with master",
 		zap.String("worker_id", w.workerID),
 		zap.String("master_addr", w.masterAddr),
+		zap.String("address", address),
 	)
 
-	// We'll implement worker registration after we add the WorkerService RPC
-	// For now, just log
-	w.logger.Info("Worker registration successful", zap.String("worker_id", w.workerID))
+	// Create a worker service client from the master connection
+	workerSvcClient := proto.NewWorkerServiceClient(w.conn)
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	resp, err := workerSvcClient.RegisterWorker(ctx, &proto.RegisterWorkerRequest{
+		WorkerId:          w.workerID,
+		Address:           address,
+		MaxConcurrentJobs: maxJobs,
+	})
+	if err != nil {
+		return fmt.Errorf("registration failed: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("registration rejected: %s", resp.Message)
+	}
+
+	w.logger.Info("Worker registration successful",
+		zap.String("worker_id", w.workerID),
+		zap.String("message", resp.Message),
+	)
 	return nil
 }
 
@@ -85,11 +111,33 @@ func (w *WorkerClient) StartHeartbeat(ctx context.Context, interval time.Duratio
 
 // sendHeartbeat sends a single heartbeat to master
 func (w *WorkerClient) sendHeartbeat(ctx context.Context) error {
-	// We'll implement this after adding WorkerService RPC
-	// For now, just log
+	// Create a worker service client from the master connection
+	workerSvcClient := proto.NewWorkerServiceClient(w.conn)
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	active, completed, failed := w.GetStats()
+
+	resp, err := workerSvcClient.Heartbeat(ctx, &proto.HeartbeatRequest{
+		WorkerId: w.workerID,
+		Stats: &proto.WorkerStats{
+			ActiveJobs:    active,
+			CompletedJobs: completed,
+			FailedJobs:    failed,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("heartbeat failed: %w", err)
+	}
+
+	if !resp.Ack {
+		w.logger.Warn("Heartbeat not acknowledged")
+	}
+
 	w.logger.Debug("Heartbeat sent",
 		zap.String("worker_id", w.workerID),
-		zap.Int32("active_jobs", w.activeJobs),
+		zap.Int32("active_jobs", active),
 	)
 	return nil
 }
@@ -127,9 +175,28 @@ func (w *WorkerClient) reportSuccess(ctx context.Context, jobID string, result *
 		zap.Int64("duration_ms", result.DurationMs),
 	)
 
-	// We'll use the complete job RPC through master service
-	// For now this is a placeholder - we need to add a CompleteJob RPC
-	// or use the existing patterns
+	// Create a worker service client from the master connection
+	workerSvcClient := proto.NewWorkerServiceClient(w.conn)
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	resp, err := workerSvcClient.ReportResult(ctx, &proto.ReportResultRequest{
+		JobId:    jobID,
+		WorkerId: w.workerID,
+		Result: &proto.JobResult{
+			Success:    true,
+			Output:     result.Output,
+			DurationMs: result.DurationMs,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to report success: %w", err)
+	}
+
+	if !resp.Success {
+		w.logger.Warn("Result report not successful", zap.String("message", resp.Message))
+	}
 
 	return nil
 }
@@ -141,7 +208,28 @@ func (w *WorkerClient) reportFailure(ctx context.Context, jobID string, errMsg s
 		zap.String("error", errMsg),
 	)
 
-	// Placeholder - will implement with proper RPC
+	// Create a worker service client from the master connection
+	workerSvcClient := proto.NewWorkerServiceClient(w.conn)
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	resp, err := workerSvcClient.ReportResult(ctx, &proto.ReportResultRequest{
+		JobId:    jobID,
+		WorkerId: w.workerID,
+		Result: &proto.JobResult{
+			Success: false,
+			Error:   errMsg,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to report failure: %w", err)
+	}
+
+	if !resp.Success {
+		w.logger.Warn("Result report not successful", zap.String("message", resp.Message))
+	}
+
 	return nil
 }
 

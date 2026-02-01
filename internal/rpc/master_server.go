@@ -11,13 +11,21 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// MasterServer implements the gRPC MasterService
+// Scheduler interface for worker management
+type Scheduler interface {
+	RegisterWorker(id, address string, maxJobs int)
+	UpdateHeartbeat(workerID string, activeJobs int)
+}
+
+// MasterServer implements the gRPC MasterService and WorkerService
 type MasterServer struct {
 	proto.UnimplementedMasterServiceServer
-	raftNode *consensus.RaftNode
-	fsm      *consensus.FSM
-	applier  *consensus.ApplyCommand
-	logger   *zap.Logger
+	proto.UnimplementedWorkerServiceServer
+	raftNode  *consensus.RaftNode
+	fsm       *consensus.FSM
+	applier   *consensus.ApplyCommand
+	scheduler Scheduler
+	logger    *zap.Logger
 }
 
 // NewMasterServer creates a new master gRPC server
@@ -28,6 +36,11 @@ func NewMasterServer(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *z
 		applier:  consensus.NewApplyCommand(raftNode),
 		logger:   logger,
 	}
+}
+
+// SetScheduler sets the scheduler reference (to avoid circular dependency)
+func (s *MasterServer) SetScheduler(scheduler Scheduler) {
+	s.scheduler = scheduler
 }
 
 // SubmitJob handles job submission via gRPC
@@ -201,6 +214,99 @@ func (s *MasterServer) CancelJob(ctx context.Context, req *proto.CancelJobReques
 	return &proto.CancelJobResponse{
 		Success: true,
 		Message: "Job cancelled successfully",
+	}, nil
+}
+
+// RegisterWorker handles worker registration
+func (s *MasterServer) RegisterWorker(ctx context.Context, req *proto.RegisterWorkerRequest) (*proto.RegisterWorkerResponse, error) {
+	s.logger.Info("Worker registration request",
+		zap.String("worker_id", req.WorkerId),
+		zap.String("address", req.Address),
+		zap.Int32("max_jobs", req.MaxConcurrentJobs),
+	)
+
+	// Register worker with scheduler
+	if s.scheduler != nil {
+		s.scheduler.RegisterWorker(req.WorkerId, req.Address, int(req.MaxConcurrentJobs))
+	}
+
+	return &proto.RegisterWorkerResponse{
+		Success: true,
+		Message: "Worker registered successfully",
+	}, nil
+}
+
+// Heartbeat handles worker heartbeat messages
+func (s *MasterServer) Heartbeat(ctx context.Context, req *proto.HeartbeatRequest) (*proto.HeartbeatResponse, error) {
+	s.logger.Debug("Worker heartbeat",
+		zap.String("worker_id", req.WorkerId),
+		zap.Int32("active_jobs", req.Stats.ActiveJobs),
+	)
+
+	// Update worker heartbeat in scheduler
+	if s.scheduler != nil {
+		s.scheduler.UpdateHeartbeat(req.WorkerId, int(req.Stats.ActiveJobs))
+	}
+
+	return &proto.HeartbeatResponse{
+		Ack: true,
+	}, nil
+}
+
+// ReportResult handles job result reporting from workers
+func (s *MasterServer) ReportResult(ctx context.Context, req *proto.ReportResultRequest) (*proto.ReportResultResponse, error) {
+	// Check if we're the leader
+	if !s.raftNode.IsLeader() {
+		leader := s.raftNode.Leader()
+		return &proto.ReportResultResponse{
+			Success: false,
+			Message: fmt.Sprintf("not leader, redirect to %s", leader),
+		}, nil
+	}
+
+	s.logger.Info("Job result reported",
+		zap.String("job_id", req.JobId),
+		zap.String("worker_id", req.WorkerId),
+		zap.Bool("success", req.Result.Success),
+	)
+
+	// Convert proto result to internal result
+	result := &job.Result{
+		Success:    req.Result.Success,
+		Output:     req.Result.Output,
+		Error:      req.Result.Error,
+		DurationMs: req.Result.DurationMs,
+	}
+
+	// Apply result to Raft cluster
+	var err error
+	if result.Success {
+		err = s.applier.CompleteJob(req.JobId, result)
+	} else {
+		err = s.applier.FailJob(req.JobId, result.Error)
+	}
+
+	if err != nil {
+		s.logger.Error("Failed to apply job result", zap.Error(err))
+		return &proto.ReportResultResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to apply result: %v", err),
+		}, err
+	}
+
+	return &proto.ReportResultResponse{
+		Success: true,
+		Message: "Result recorded successfully",
+	}, nil
+}
+
+// AssignJob is a placeholder - workers receive jobs via active push from scheduler
+func (s *MasterServer) AssignJob(ctx context.Context, req *proto.AssignJobRequest) (*proto.AssignJobResponse, error) {
+	// This endpoint is not used in our design - scheduler pushes jobs to workers
+	// Kept for API compatibility
+	return &proto.AssignJobResponse{
+		Accepted: false,
+		Message:  "Use scheduler-initiated job assignment",
 	}, nil
 }
 

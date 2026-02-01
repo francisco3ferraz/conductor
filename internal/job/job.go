@@ -110,7 +110,8 @@ func (j *Job) Start() error {
 
 // Complete marks the job as completed
 func (j *Job) Complete(result *Result) error {
-	if j.Status != StatusRunning {
+	// Allow completion from either assigned or running status
+	if j.Status != StatusRunning && j.Status != StatusAssigned {
 		return fmt.Errorf("cannot complete job in status %s", j.Status)
 	}
 	j.Status = StatusCompleted

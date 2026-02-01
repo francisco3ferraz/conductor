@@ -58,9 +58,12 @@ func main() {
 	}
 	defer workerClient.Close()
 
+	// Determine worker's gRPC address to advertise (use WORKER_ADDR env var or default)
+	advertiseAddr := fmt.Sprintf("localhost:%d", cfg.GRPC.WorkerPort)
+
 	// Register with master
 	ctx := context.Background()
-	if err := workerClient.Register(ctx, int32(cfg.Worker.MaxConcurrentJobs)); err != nil {
+	if err := workerClient.Register(ctx, int32(cfg.Worker.MaxConcurrentJobs), advertiseAddr); err != nil {
 		logger.Fatal("Failed to register with master", zap.Error(err))
 	}
 
@@ -70,16 +73,38 @@ func main() {
 
 	go workerClient.StartHeartbeat(heartbeatCtx, cfg.Worker.HeartbeatInterval)
 
-	// Create result reporter function
+	// Create result reporter function that sends results back to master
 	resultReporter := func(ctx context.Context, jobID string, result *job.Result) error {
 		logger.Info("Job execution completed",
 			zap.String("job_id", jobID),
 			zap.Bool("success", result.Success),
 			zap.Int64("duration_ms", result.DurationMs),
 		)
-		// Worker has completed the job
-		// For now we just log completion
-		// Full implementation would report back to master
+
+		// Report result to master via gRPC
+		workerSvcClient := proto.NewWorkerServiceClient(workerClient.GetConn())
+		reportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		resp, err := workerSvcClient.ReportResult(reportCtx, &proto.ReportResultRequest{
+			JobId:    jobID,
+			WorkerId: cfg.Worker.WorkerID,
+			Result: &proto.JobResult{
+				Success:    result.Success,
+				Output:     result.Output,
+				Error:      result.Error,
+				DurationMs: result.DurationMs,
+			},
+		})
+		if err != nil {
+			logger.Error("Failed to report result", zap.Error(err))
+			return err
+		}
+
+		if !resp.Success {
+			logger.Warn("Result report not acknowledged", zap.String("message", resp.Message))
+		}
+
 		return nil
 	}
 

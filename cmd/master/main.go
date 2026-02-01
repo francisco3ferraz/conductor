@@ -87,6 +87,13 @@ func main() {
 	grpcServer := grpc.NewServer()
 	masterSvc := rpc.NewMasterServer(raftNode, fsm, logger)
 	proto.RegisterMasterServiceServer(grpcServer, masterSvc)
+	proto.RegisterWorkerServiceServer(grpcServer, masterSvc)
+
+	// Create and start scheduler
+	sched := scheduler.NewScheduler(raftNode, fsm, logger)
+
+	// Wire scheduler to master server
+	masterSvc.SetScheduler(sched)
 
 	// Start gRPC server
 	grpcAddr := fmt.Sprintf(":%d", cfg.GRPC.MasterPort)
@@ -101,9 +108,6 @@ func main() {
 			logger.Error("gRPC server error", zap.Error(err))
 		}
 	}()
-
-	// Create and start scheduler
-	sched := scheduler.NewScheduler(raftNode, fsm, logger)
 
 	// Start scheduler in background
 	schedCtx, schedCancel := context.WithCancel(context.Background())
