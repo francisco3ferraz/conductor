@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -44,11 +45,15 @@ func main() {
 		zap.Int("grpc_port", cfg.GRPC.MasterPort),
 	)
 
-	// Initialize storage
-	store := storage.NewMemory()
+	// Initialize storage with BoltDB
+	boltPath := filepath.Join(cfg.Cluster.DataDir, "jobs.db")
+	store, err := storage.NewBoltStore(boltPath)
+	if err != nil {
+		logger.Fatal("Failed to create bolt store", zap.Error(err))
+	}
 	defer store.Close()
 
-	logger.Info("Storage initialized", zap.String("type", "memory"))
+	logger.Info("Storage initialized", zap.String("type", "boltdb"), zap.String("path", boltPath))
 
 	// Initialize Raft FSM
 	fsm := consensus.NewFSM(logger)
@@ -83,8 +88,20 @@ func main() {
 		logger.Info("Leader elected", zap.String("leader", raftNode.Leader()))
 	}
 
-	// Create gRPC server
-	grpcServer := grpc.NewServer()
+	// Create gRPC server with interceptors
+	interceptors := []grpc.UnaryServerInterceptor{
+		rpc.LoggingInterceptor(logger),
+		rpc.AuthInterceptorWithConfig(logger, &rpc.JWTConfig{
+			SecretKey:  cfg.JWT.SecretKey,
+			Issuer:     cfg.JWT.Issuer,
+			Audience:   cfg.JWT.Audience,
+			SkipExpiry: cfg.JWT.SkipExpiry,
+		}),
+		rpc.RecoveryInterceptor(logger),
+	}
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(rpc.ChainInterceptors(interceptors...)),
+	)
 	masterSvc := rpc.NewMasterServer(raftNode, fsm, logger)
 	proto.RegisterMasterServiceServer(grpcServer, masterSvc)
 	proto.RegisterWorkerServiceServer(grpcServer, masterSvc)

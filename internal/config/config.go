@@ -15,12 +15,14 @@ type Config struct {
 	Worker    WorkerConfig    `mapstructure:"worker"`
 	Scheduler SchedulerConfig `mapstructure:"scheduler"`
 	Log       LogConfig       `mapstructure:"log"`
+	JWT       JWTConfig       `mapstructure:"jwt"`
 }
 
 type ClusterConfig struct {
 	NodeID   string `mapstructure:"node_id"`
 	BindAddr string `mapstructure:"bind_addr"`
 	RaftDir  string `mapstructure:"raft_dir"`
+	DataDir  string `mapstructure:"data_dir"`
 }
 
 type RaftConfig struct {
@@ -52,6 +54,14 @@ type SchedulerConfig struct {
 
 type LogConfig struct {
 	Level string `mapstructure:"level"`
+}
+
+type JWTConfig struct {
+	SecretKey     string `mapstructure:"secret_key"`
+	PublicKeyPath string `mapstructure:"public_key_path"`
+	Issuer        string `mapstructure:"issuer"`
+	Audience      string `mapstructure:"audience"`
+	SkipExpiry    bool   `mapstructure:"skip_expiry"`
 }
 
 // Load loads configuration from file and environment variables
@@ -91,6 +101,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cluster.node_id", "node-1")
 	v.SetDefault("cluster.bind_addr", "127.0.0.1:7000")
 	v.SetDefault("cluster.raft_dir", "/tmp/conductor/raft")
+	v.SetDefault("cluster.data_dir", "/tmp/conductor/data")
 
 	// Raft defaults
 	v.SetDefault("raft.heartbeat_timeout", "1s")
@@ -117,6 +128,12 @@ func setDefaults(v *viper.Viper) {
 
 	// Log defaults
 	v.SetDefault("log.level", "info")
+
+	// JWT defaults
+	v.SetDefault("jwt.secret_key", "dev-secret-key-conductor-2026-change-in-production")
+	v.SetDefault("jwt.issuer", "conductor-system")
+	v.SetDefault("jwt.audience", "conductor-api")
+	v.SetDefault("jwt.skip_expiry", true) // Development mode
 }
 
 // Validate validates the configuration

@@ -122,8 +122,14 @@ func main() {
 		return nil
 	}
 
-	// Create and start worker gRPC server
-	grpcServer := grpc.NewServer()
+	// Create gRPC server with interceptors
+	interceptors := []grpc.UnaryServerInterceptor{
+		rpc.LoggingInterceptor(logger),
+		rpc.RecoveryInterceptor(logger),
+	}
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(rpc.ChainInterceptors(interceptors...)),
+	)
 	workerSvc := rpc.NewWorkerServer(cfg.Worker.WorkerID, exec, resultReporter, logger)
 	proto.RegisterWorkerServiceServer(grpcServer, workerSvc)
 
