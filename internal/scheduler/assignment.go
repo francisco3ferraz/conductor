@@ -56,25 +56,3 @@ func (s *Scheduler) sendJobToWorker(j *job.Job, w *worker.WorkerInfo) error {
 
 	return nil
 }
-
-// findAvailableWorker finds a worker with available capacity
-// Deprecated: Use policy.SelectWorker() with configured scheduling policy instead
-func (s *Scheduler) findAvailableWorker() *worker.WorkerInfo {
-	workers := s.registry.List()
-
-	availableWorkers := make([]*worker.WorkerInfo, 0)
-	for _, w := range workers {
-		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
-			availableWorkers = append(availableWorkers, w)
-		}
-	}
-
-	if len(availableWorkers) == 0 {
-		return nil
-	}
-
-	// Use the configured scheduling policy
-	// Create a dummy job for policy selection
-	dummyJob := &job.Job{Priority: 5}
-	return s.policy.SelectWorker(dummyJob, availableWorkers)
-}

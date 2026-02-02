@@ -111,21 +111,6 @@ func (r *Registry) MarkInactive(timeout time.Duration) []string {
 	return inactive
 }
 
-// FindAvailable finds an available worker with capacity
-func (r *Registry) FindAvailable() *WorkerInfo {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	// Simple strategy: find first worker with capacity
-	for _, worker := range r.workers {
-		if worker.Status == "active" && worker.ActiveJobs < worker.MaxConcurrentJobs {
-			return worker
-		}
-	}
-
-	return nil
-}
-
 // ToStorageWorkerInfo converts WorkerInfo to storage.WorkerInfo
 func (w *WorkerInfo) ToStorageWorkerInfo() *storage.WorkerInfo {
 	return &storage.WorkerInfo{

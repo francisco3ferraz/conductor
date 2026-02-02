@@ -72,22 +72,6 @@ func (w *WorkerServer) Heartbeat(ctx context.Context, req *proto.HeartbeatReques
 	}, nil
 }
 
-// RegisterWorker handles worker registration (deprecated - using direct master service now)
-func (w *WorkerServer) RegisterWorker(ctx context.Context, req *proto.RegisterWorkerRequest) (*proto.RegisterWorkerResponse, error) {
-	return &proto.RegisterWorkerResponse{
-		Success: true,
-		Message: "Registration acknowledged",
-	}, nil
-}
-
-// ReportResult handles job result reporting (deprecated - using direct callback now)
-func (w *WorkerServer) ReportResult(ctx context.Context, req *proto.ReportResultRequest) (*proto.ReportResultResponse, error) {
-	return &proto.ReportResultResponse{
-		Success: true,
-		Message: "Result acknowledged",
-	}, nil
-}
-
 // protoToJob converts proto.Job to internal job.Job
 func protoToJob(pj *proto.Job) *job.Job {
 	j := &job.Job{

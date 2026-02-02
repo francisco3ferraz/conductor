@@ -212,34 +212,55 @@ func TestRegistry_MarkInactive(t *testing.T) {
 	assert.Equal(t, "inactive", worker3.Status)
 }
 
-func TestRegistry_FindAvailable(t *testing.T) {
+func TestRegistry_ListAvailableWorkers(t *testing.T) {
 	registry := NewRegistry()
 
-	// No workers - should return nil
-	worker := registry.FindAvailable()
-	assert.Nil(t, worker)
+	// No workers - should return empty list
+	workers := registry.List()
+	assert.Empty(t, workers)
 
 	// Register workers
 	registry.Register("worker-1", "localhost:9001", 2)
 	registry.Register("worker-2", "localhost:9002", 5)
 
-	// Both workers available
-	worker = registry.FindAvailable()
-	assert.NotNil(t, worker)
+	// Both workers should be listed
+	workers = registry.List()
+	assert.Len(t, workers, 2)
+
+	// Check availability status
+	var availableCount int
+	for _, w := range workers {
+		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+			availableCount++
+		}
+	}
+	assert.Equal(t, 2, availableCount)
 
 	// Make worker-1 fully loaded
 	registry.UpdateHeartbeat("worker-1", 2)
 
-	// Should still find worker-2
-	worker = registry.FindAvailable()
-	assert.NotNil(t, worker)
+	// Check availability again
+	workers = registry.List()
+	availableCount = 0
+	for _, w := range workers {
+		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+			availableCount++
+		}
+	}
+	assert.Equal(t, 1, availableCount)
 
 	// Make worker-2 fully loaded
 	registry.UpdateHeartbeat("worker-2", 5)
 
 	// No available workers
-	worker = registry.FindAvailable()
-	assert.Nil(t, worker)
+	workers = registry.List()
+	availableCount = 0
+	for _, w := range workers {
+		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+			availableCount++
+		}
+	}
+	assert.Equal(t, 0, availableCount)
 }
 
 func TestWorkerInfo_ToStorageWorkerInfo(t *testing.T) {

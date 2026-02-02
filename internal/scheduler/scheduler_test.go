@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/francisco3ferraz/conductor/internal/consensus"
+	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -133,14 +135,17 @@ func TestScheduler_CheckWorkerHealth(t *testing.T) {
 	}
 }
 
-func TestScheduler_FindAvailableWorker(t *testing.T) {
+func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
 	scheduler := NewScheduler(nil, fsm, logger)
 
-	// No workers - should find none
-	worker := scheduler.findAvailableWorker()
-	assert.Nil(t, worker)
+	// Set to LeastLoaded policy for predictable testing
+	scheduler.SetSchedulingPolicy(NewLeastLoadedPolicy())
+
+	// No workers - policy should return nil
+	workers := scheduler.registry.List()
+	assert.Empty(t, workers)
 
 	// Register workers with different loads
 	scheduler.registry.Register("worker-1", "localhost:9001", 10)
@@ -152,10 +157,21 @@ func TestScheduler_FindAvailableWorker(t *testing.T) {
 	scheduler.UpdateHeartbeat("worker-2", 0)
 	scheduler.UpdateHeartbeat("worker-3", 8)
 
-	// Should find an available worker (with capacity)
-	worker = scheduler.findAvailableWorker()
-	assert.NotNil(t, worker)
-	assert.True(t, worker.ActiveJobs < worker.MaxConcurrentJobs)
+	// Get available workers
+	allWorkers := scheduler.registry.List()
+	availableWorkers := make([]*worker.WorkerInfo, 0)
+	for _, w := range allWorkers {
+		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+			availableWorkers = append(availableWorkers, w)
+		}
+	}
+
+	// Policy should select worker with least load (worker-2 with 0 jobs)
+	dummyJob := &job.Job{Priority: 5}
+	selected := scheduler.policy.SelectWorker(dummyJob, availableWorkers)
+	assert.NotNil(t, selected)
+	assert.Equal(t, "worker-2", selected.ID)
+	assert.Equal(t, 0, selected.ActiveJobs)
 
 	// Make all workers fully loaded
 	scheduler.UpdateHeartbeat("worker-1", 10)
@@ -163,8 +179,14 @@ func TestScheduler_FindAvailableWorker(t *testing.T) {
 	scheduler.UpdateHeartbeat("worker-3", 10)
 
 	// No available workers
-	worker = scheduler.findAvailableWorker()
-	assert.Nil(t, worker)
+	allWorkers = scheduler.registry.List()
+	availableWorkers = make([]*worker.WorkerInfo, 0)
+	for _, w := range allWorkers {
+		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+			availableWorkers = append(availableWorkers, w)
+		}
+	}
+	assert.Empty(t, availableWorkers)
 }
 
 func TestScheduler_SchedulePendingJobs_NoWorkers(t *testing.T) {
@@ -187,7 +209,7 @@ func TestScheduler_Stop(t *testing.T) {
 	scheduler.Stop()
 }
 
-func TestScheduler_FindAvailableWorker_InactiveWorkersIgnored(t *testing.T) {
+func TestScheduler_PolicyIgnoresInactiveWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
 	scheduler := NewScheduler(nil, fsm, logger)
@@ -201,8 +223,22 @@ func TestScheduler_FindAvailableWorker_InactiveWorkersIgnored(t *testing.T) {
 	scheduler.UpdateHeartbeat("worker-active", 0)
 	scheduler.CheckWorkerHealth(5 * time.Millisecond)
 
-	// Should only find active worker
-	worker := scheduler.findAvailableWorker()
-	assert.NotNil(t, worker)
-	assert.Equal(t, "worker-active", worker.ID)
+	// Get available workers (should only include active ones)
+	allWorkers := scheduler.registry.List()
+	availableWorkers := make([]*worker.WorkerInfo, 0)
+	for _, w := range allWorkers {
+		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+			availableWorkers = append(availableWorkers, w)
+		}
+	}
+
+	// Should only have the active worker
+	assert.Len(t, availableWorkers, 1)
+	assert.Equal(t, "worker-active", availableWorkers[0].ID)
+
+	// Policy should select the active worker
+	dummyJob := &job.Job{Priority: 5}
+	selected := scheduler.policy.SelectWorker(dummyJob, availableWorkers)
+	assert.NotNil(t, selected)
+	assert.Equal(t, "worker-active", selected.ID)
 }
