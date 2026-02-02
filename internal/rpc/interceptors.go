@@ -249,8 +249,8 @@ func ChainInterceptors(interceptors ...grpc.UnaryServerInterceptor) grpc.UnarySe
 // validateJWT validates a JWT token with comprehensive checks
 func validateJWT(tokenString string, config *JWTConfig, logger *zap.Logger) (*jwt.Token, error) {
 	// Remove Bearer prefix if present
-	if strings.HasPrefix(tokenString, "Bearer ") {
-		tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	if after, ok := strings.CutPrefix(tokenString, "Bearer "); ok {
+		tokenString = after
 	}
 
 	// Parse options to handle expiry skipping

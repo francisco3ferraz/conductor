@@ -81,6 +81,16 @@ func Load(configPath string) (*Config, error) {
 
 	// Environment variables override config file
 	v.AutomaticEnv()
+	v.SetEnvPrefix("") // No prefix for env vars
+
+	// Bind specific environment variables
+	v.BindEnv("worker.worker_id", "WORKER_ID")
+	v.BindEnv("grpc.worker_port", "GRPC_WORKER_PORT")
+	v.BindEnv("grpc.master_port", "GRPC_MASTER_PORT")
+	v.BindEnv("worker.master_addr", "MASTER_ADDR")
+	v.BindEnv("cluster.node_id", "NODE_ID")
+	v.BindEnv("cluster.bind_addr", "BIND_ADDR")
+	v.BindEnv("cluster.raft_dir", "RAFT_DIR")
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {

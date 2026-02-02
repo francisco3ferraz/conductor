@@ -178,21 +178,31 @@ func main() {
 	// Graceful shutdown
 	logger.Info("Shutting down worker node...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Stop heartbeat
+	// Stop accepting new jobs by stopping heartbeat first
 	heartbeatCancel()
+	logger.Info("Stopped heartbeat - no new jobs will be assigned")
+
+	// Give some time for current jobs to complete
+	time.Sleep(2 * time.Second)
+
+	// Stop worker manager (will finish current jobs gracefully)
+	mgr.Stop()
+	logger.Info("Worker manager stopped")
 
 	// Stop HTTP server
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", zap.Error(err))
 	}
 
-	// Close worker client
-	workerClient.Close()
+	// Stop gRPC server
+	grpcServer.GracefulStop()
+	logger.Info("gRPC server stopped")
 
-	// Close Raft
+	// Close worker client (will deregister from master)
+	workerClient.Close()
 	logger.Info("Shutdown complete")
 }
 
@@ -205,6 +215,10 @@ func healthHandler(logger *zap.Logger) http.HandlerFunc {
 
 func readyHandler(logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// In a full implementation, we'd check:
+		// - Worker manager status
+		// - Connection to master
+		// - Current job count
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("READY"))
 	}

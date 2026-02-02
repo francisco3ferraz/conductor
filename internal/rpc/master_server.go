@@ -6,7 +6,9 @@ import (
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
+	"github.com/francisco3ferraz/conductor/internal/failover"
 	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/storage"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -15,6 +17,9 @@ import (
 type Scheduler interface {
 	RegisterWorker(id, address string, maxJobs int)
 	UpdateHeartbeat(workerID string, activeJobs int)
+	RecordWorkerHeartbeat(workerID string, stats *failover.WorkerStats)
+	GetFailureDetector() *failover.FailureDetector
+	GetRecoveryManager() *failover.RecoveryManager
 }
 
 // MasterServer implements the gRPC MasterService and WorkerService
@@ -225,9 +230,20 @@ func (s *MasterServer) RegisterWorker(ctx context.Context, req *proto.RegisterWo
 		zap.Int32("max_jobs", req.MaxConcurrentJobs),
 	)
 
-	// Register worker with scheduler
+	// Register worker with scheduler (includes failover detector registration)
 	if s.scheduler != nil {
 		s.scheduler.RegisterWorker(req.WorkerId, req.Address, int(req.MaxConcurrentJobs))
+
+		// Also register directly with failure detector
+		if failureDetector := s.scheduler.GetFailureDetector(); failureDetector != nil {
+			workerInfo := &storage.WorkerInfo{
+				ID:                req.WorkerId,
+				Address:           req.Address,
+				MaxConcurrentJobs: int(req.MaxConcurrentJobs),
+				Status:            "active",
+			}
+			failureDetector.RegisterWorker(workerInfo)
+		}
 	}
 
 	return &proto.RegisterWorkerResponse{
@@ -243,9 +259,16 @@ func (s *MasterServer) Heartbeat(ctx context.Context, req *proto.HeartbeatReques
 		zap.Int32("active_jobs", req.Stats.ActiveJobs),
 	)
 
-	// Update worker heartbeat in scheduler
+	// Convert proto stats to failover stats
+	stats := &failover.WorkerStats{
+		ActiveJobs:    req.Stats.ActiveJobs,
+		CompletedJobs: req.Stats.CompletedJobs,
+		FailedJobs:    req.Stats.FailedJobs,
+	}
+
+	// Update worker heartbeat in scheduler (includes failover system)
 	if s.scheduler != nil {
-		s.scheduler.UpdateHeartbeat(req.WorkerId, int(req.Stats.ActiveJobs))
+		s.scheduler.RecordWorkerHeartbeat(req.WorkerId, stats)
 	}
 
 	return &proto.HeartbeatResponse{

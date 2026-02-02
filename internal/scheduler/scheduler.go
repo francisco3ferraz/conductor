@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/francisco3ferraz/conductor/internal/consensus"
+	"github.com/francisco3ferraz/conductor/internal/failover"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"github.com/francisco3ferraz/conductor/internal/worker"
@@ -22,12 +23,16 @@ type Scheduler struct {
 	registry *worker.Registry
 	mu       sync.RWMutex
 
+	// Failover components
+	failureDetector *failover.FailureDetector
+	recoveryManager *failover.RecoveryManager
+
 	stopCh chan struct{}
 }
 
 // NewScheduler creates a new job scheduler
 func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.Logger) *Scheduler {
-	return &Scheduler{
+	s := &Scheduler{
 		raftNode: raftNode,
 		fsm:      fsm,
 		applier:  consensus.NewApplyCommand(raftNode),
@@ -35,12 +40,96 @@ func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.
 		registry: worker.NewRegistry(),
 		stopCh:   make(chan struct{}),
 	}
+
+	// Initialize failover components
+	onWorkerFailure := func(workerID string) {
+		s.handleWorkerFailure(workerID)
+	}
+
+	s.failureDetector = failover.NewFailureDetector(
+		10*time.Second, // Worker timeout
+		2*time.Second,  // Check interval
+		onWorkerFailure,
+		logger,
+	)
+
+	// Recovery manager will be initialized when we have a job store
+	// This happens in SetJobStore method
+
+	return s
+}
+
+// assignPendingJobs finds and assigns pending jobs to available workers
+func (s *Scheduler) assignPendingJobs() {
+	// Get pending jobs from FSM
+	jobs := s.fsm.ListJobs()
+	var pendingJobs []*job.Job
+
+	for _, j := range jobs {
+		if j.Status == job.StatusPending {
+			pendingJobs = append(pendingJobs, j)
+		}
+	}
+
+	if len(pendingJobs) == 0 {
+		return
+	}
+
+	s.logger.Debug("Found pending jobs", zap.Int("count", len(pendingJobs)))
+
+	// Get available workers
+	workers := s.registry.List()
+	availableWorkers := make([]*worker.WorkerInfo, 0)
+
+	for _, w := range workers {
+		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+			availableWorkers = append(availableWorkers, w)
+		}
+	}
+
+	if len(availableWorkers) == 0 {
+		s.logger.Debug("No available workers")
+		return
+	}
+
+	// Simple assignment: assign jobs to workers in round-robin fashion
+	workerIdx := 0
+	for _, j := range pendingJobs {
+		if workerIdx >= len(availableWorkers) {
+			break
+		}
+
+		w := availableWorkers[workerIdx]
+		if err := s.applier.AssignJob(j.ID, w.ID); err != nil {
+			s.logger.Error("Failed to assign job",
+				zap.String("job_id", j.ID),
+				zap.String("worker_id", w.ID),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		s.logger.Info("Job assigned",
+			zap.String("job_id", j.ID),
+			zap.String("worker_id", w.ID),
+		)
+
+		workerIdx++
+	}
 }
 
 // Start starts the scheduler background loop
 func (s *Scheduler) Start(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+
+	// Start failover components
+	if s.failureDetector != nil {
+		go s.failureDetector.Start(ctx)
+	}
+	if s.recoveryManager != nil {
+		go s.recoveryManager.Start()
+	}
 
 	s.logger.Info("Scheduler started")
 
@@ -63,7 +152,20 @@ func (s *Scheduler) Start(ctx context.Context) {
 
 // Stop stops the scheduler
 func (s *Scheduler) Stop() {
+	s.logger.Info("Stopping scheduler")
+
+	// Stop failure detector
+	if s.failureDetector != nil {
+		s.failureDetector.Stop()
+	}
+
+	// Stop recovery manager
+	if s.recoveryManager != nil {
+		s.recoveryManager.Stop()
+	}
+
 	close(s.stopCh)
+	s.logger.Info("Scheduler stopped")
 }
 
 // schedulePendingJobs finds pending jobs and assigns them to workers
@@ -180,4 +282,61 @@ func (s *Scheduler) CheckWorkerHealth(timeout time.Duration) {
 			zap.String("worker_id", workerID),
 		)
 	}
+}
+
+// SetJobStore initializes the recovery manager with a job store
+func (s *Scheduler) SetJobStore(jobStore storage.Store) {
+	if s.recoveryManager == nil {
+		s.recoveryManager = failover.NewRecoveryManager(
+			s,             // Pass scheduler reference
+			jobStore,      // Job storage
+			s.fsm,         // FSM for job state management
+			3,             // Max retries
+			5*time.Second, // Retry delay
+			s.logger,
+		)
+	}
+}
+
+// TriggerAssignment triggers the job assignment process
+func (s *Scheduler) TriggerAssignment() error {
+	// This method is called by the recovery manager to reassign jobs
+	// We'll trigger the assignment loop manually
+	go s.assignPendingJobs()
+	return nil
+}
+
+// handleWorkerFailure handles worker failure detected by failure detector
+func (s *Scheduler) handleWorkerFailure(workerID string) {
+	s.logger.Warn("Worker failure detected by scheduler",
+		zap.String("worker_id", workerID),
+	)
+
+	// Remove from registry
+	s.RemoveWorker(workerID)
+
+	// Trigger recovery if recovery manager is available
+	if s.recoveryManager != nil {
+		s.recoveryManager.HandleWorkerFailure(workerID)
+	}
+}
+
+// RecordWorkerHeartbeat records a heartbeat from a worker
+func (s *Scheduler) RecordWorkerHeartbeat(workerID string, stats *failover.WorkerStats) {
+	if s.failureDetector != nil {
+		s.failureDetector.RecordHeartbeat(workerID, stats)
+	}
+
+	// Also update the local registry
+	s.registry.UpdateHeartbeat(workerID, int(stats.ActiveJobs))
+}
+
+// GetFailureDetector returns the failure detector (for master server integration)
+func (s *Scheduler) GetFailureDetector() *failover.FailureDetector {
+	return s.failureDetector
+}
+
+// GetRecoveryManager returns the recovery manager (for health checks)
+func (s *Scheduler) GetRecoveryManager() *failover.RecoveryManager {
+	return s.recoveryManager
 }

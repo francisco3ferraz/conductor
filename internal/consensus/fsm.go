@@ -238,6 +238,32 @@ func (f *FSM) ListJobs() []*job.Job {
 	return jobs
 }
 
+// AssignJob assigns a job to a worker (for JobStateMachine interface)
+func (f *FSM) AssignJob(jobID, workerID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	job, exists := f.jobs[jobID]
+	if !exists {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+
+	return job.Assign(workerID)
+}
+
+// FailJob fails a job (for JobStateMachine interface)
+func (f *FSM) FailJob(jobID, errorMsg string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	job, exists := f.jobs[jobID]
+	if !exists {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+
+	return job.Fail(errorMsg)
+}
+
 // GetWorker retrieves a worker by ID (read-only)
 func (f *FSM) GetWorker(id string) (*storage.WorkerInfo, error) {
 	f.mu.RLock()

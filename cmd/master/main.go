@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -109,6 +110,9 @@ func main() {
 	// Create and start scheduler
 	sched := scheduler.NewScheduler(raftNode, fsm, logger)
 
+	// Set job store for recovery manager
+	sched.SetJobStore(store)
+
 	// Wire scheduler to master server
 	masterSvc.SetScheduler(sched)
 
@@ -138,6 +142,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler(logger))
 	mux.HandleFunc("/ready", readyHandler(logger, store))
+	mux.HandleFunc("/failover/status", failoverStatusHandler(logger, sched))
 
 	httpServer := &http.Server{
 		Addr:    ":8080",
@@ -164,6 +169,9 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	// Stop scheduler first (stops failover components)
+	sched.Stop()
 
 	// Stop gRPC server
 	grpcServer.GracefulStop()
@@ -217,5 +225,48 @@ func readyHandler(logger *zap.Logger, store storage.Store) http.HandlerFunc {
 
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("READY"))
+	}
+}
+
+func failoverStatusHandler(logger *zap.Logger, sched *scheduler.Scheduler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		status := map[string]interface{}{
+			"failure_detector": "unknown",
+			"recovery_manager": "unknown",
+			"active_workers":   0,
+			"failed_workers":   0,
+		}
+
+		// Check failure detector status
+		if failureDetector := sched.GetFailureDetector(); failureDetector != nil {
+			status["failure_detector"] = "active"
+
+			activeWorkers := failureDetector.ListActiveWorkers()
+			status["active_workers"] = len(activeWorkers)
+
+			// Get failed worker count (would need to add this method to registry)
+			// For now, just indicate detector is running
+		} else {
+			status["failure_detector"] = "not_initialized"
+		}
+
+		// Check recovery manager status
+		if recoveryManager := sched.GetRecoveryManager(); recoveryManager != nil {
+			if err := recoveryManager.HealthCheck(); err != nil {
+				status["recovery_manager"] = "unhealthy: " + err.Error()
+			} else {
+				status["recovery_manager"] = "healthy"
+			}
+		} else {
+			status["recovery_manager"] = "not_initialized"
+		}
+
+		// Write JSON response
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			logger.Error("Failed to encode failover status", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 	}
 }
