@@ -188,13 +188,15 @@ func (rm *RecoveryManager) recoverWorkerJobs(workerID string) error {
 func (rm *RecoveryManager) recoverJob(j *job.Job) error {
 	// Check if we should retry or fail the job
 	if j.RetryCount >= rm.maxRetries {
-		rm.logger.Warn("Job exceeded max retries, marking as failed",
+		rm.logger.Error("Job exceeded max retries, permanently failing",
 			zap.String("job_id", j.ID),
+			zap.String("job_type", j.Type.String()),
 			zap.Int("retry_count", j.RetryCount),
 			zap.Int("max_retries", rm.maxRetries),
 		)
 
-		return rm.fsm.FailJob(j.ID, fmt.Sprintf("Worker failure: exceeded max retries (%d)", rm.maxRetries))
+		errMsg := fmt.Sprintf("Permanent failure: worker failures exceeded max retries (%d/%d)", j.RetryCount, rm.maxRetries)
+		return rm.fsm.FailJob(j.ID, errMsg)
 	}
 
 	// Reset job for reassignment
@@ -205,6 +207,15 @@ func (rm *RecoveryManager) recoverJob(j *job.Job) error {
 	// Add delay before reassignment to allow system to stabilize
 	if rm.retryDelay > 0 {
 		time.Sleep(rm.retryDelay)
+	}
+
+	// Check if there are any healthy workers available
+	if !rm.hasHealthyWorkers() {
+		rm.logger.Warn("No healthy workers available for job reassignment",
+			zap.String("job_id", j.ID),
+		)
+		// Job remains in pending state until workers become available
+		return nil
 	}
 
 	// Attempt to reassign the job to a different worker
@@ -241,6 +252,22 @@ func (rm *RecoveryManager) resetJobForReassignment(j *job.Job) error {
 	}
 
 	return nil
+}
+
+// hasHealthyWorkers checks if there are any active workers available
+func (rm *RecoveryManager) hasHealthyWorkers() bool {
+	workers, err := rm.jobStore.ListWorkers()
+	if err != nil {
+		rm.logger.Error("Failed to list workers", zap.Error(err))
+		return false
+	}
+
+	for _, w := range workers {
+		if w.Status == "active" {
+			return true
+		}
+	}
+	return false
 }
 
 // RecoverOrphanedJobs finds and recovers jobs that may have been orphaned

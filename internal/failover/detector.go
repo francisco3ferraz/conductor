@@ -31,12 +31,13 @@ type WorkerHealthRegistry struct {
 
 // WorkerHealth tracks health status for a single worker
 type WorkerHealth struct {
-	WorkerID        string
-	LastHeartbeat   time.Time
-	Status          WorkerStatus
-	FailureCount    int
-	LastFailureTime time.Time
-	Stats           *WorkerStats
+	WorkerID         string
+	LastHeartbeat    time.Time
+	Status           WorkerStatus
+	FailureCount     int
+	LastFailureTime  time.Time
+	LastRecoveryTime time.Time
+	Stats            *WorkerStats
 }
 
 // WorkerStats contains worker performance metrics
@@ -190,11 +191,13 @@ func (fd *FailureDetector) checkWorkerHealth() {
 		case WorkerStatusFailed:
 			// Check if worker has recovered (received heartbeat recently)
 			if timeSinceLastHeartbeat < fd.timeout {
-				fd.logger.Info("Worker recovered",
+				fd.logger.Info("Worker recovered from failure",
 					zap.String("worker_id", workerID),
 					zap.Duration("downtime", now.Sub(health.LastFailureTime)),
+					zap.Int("failure_count", health.FailureCount),
 				)
 				health.Status = WorkerStatusRecovered
+				health.LastRecoveryTime = now
 
 				if fd.registry.onRecover != nil {
 					go fd.registry.onRecover(workerID)
@@ -203,7 +206,12 @@ func (fd *FailureDetector) checkWorkerHealth() {
 
 		case WorkerStatusRecovered:
 			// Transition back to active after successful recovery
-			health.Status = WorkerStatusActive
+			if timeSinceLastHeartbeat < fd.timeout {
+				fd.logger.Info("Worker fully operational after recovery",
+					zap.String("worker_id", workerID),
+				)
+				health.Status = WorkerStatusActive
+			}
 		}
 	}
 }
