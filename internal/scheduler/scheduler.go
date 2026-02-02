@@ -21,6 +21,7 @@ type Scheduler struct {
 	logger   *zap.Logger
 
 	registry *worker.Registry
+	policy   SchedulingPolicy
 	mu       sync.RWMutex
 
 	// Failover components
@@ -38,6 +39,7 @@ func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.
 		applier:  consensus.NewApplyCommand(raftNode),
 		logger:   logger,
 		registry: worker.NewRegistry(),
+		policy:   NewLeastLoadedPolicy(), // Default to least-loaded policy
 		stopCh:   make(chan struct{}),
 	}
 
@@ -75,6 +77,12 @@ func (s *Scheduler) assignPendingJobs() {
 		return
 	}
 
+	// Sort pending jobs by priority (higher priority first)
+	queue := NewJobQueue()
+	for _, j := range pendingJobs {
+		queue.Enqueue(j)
+	}
+
 	s.logger.Debug("Found pending jobs", zap.Int("count", len(pendingJobs)))
 
 	// Get available workers
@@ -92,14 +100,30 @@ func (s *Scheduler) assignPendingJobs() {
 		return
 	}
 
-	// Simple assignment: assign jobs to workers in round-robin fashion
-	workerIdx := 0
-	for _, j := range pendingJobs {
-		if workerIdx >= len(availableWorkers) {
+	// Assign jobs using the configured scheduling policy
+	for !queue.IsEmpty() {
+		j := queue.Dequeue()
+
+		// Re-check available workers (capacity may have changed)
+		availableWorkers = make([]*worker.WorkerInfo, 0)
+		for _, w := range s.registry.List() {
+			if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+				availableWorkers = append(availableWorkers, w)
+			}
+		}
+
+		if len(availableWorkers) == 0 {
+			s.logger.Debug("No more available workers")
 			break
 		}
 
-		w := availableWorkers[workerIdx]
+		// Use policy to select worker
+		w := s.policy.SelectWorker(j, availableWorkers)
+		if w == nil {
+			s.logger.Warn("Policy returned no worker for job", zap.String("job_id", j.ID))
+			continue
+		}
+
 		if err := s.applier.AssignJob(j.ID, w.ID); err != nil {
 			s.logger.Error("Failed to assign job",
 				zap.String("job_id", j.ID),
@@ -112,9 +136,8 @@ func (s *Scheduler) assignPendingJobs() {
 		s.logger.Info("Job assigned",
 			zap.String("job_id", j.ID),
 			zap.String("worker_id", w.ID),
+			zap.Int("priority", j.Priority),
 		)
-
-		workerIdx++
 	}
 }
 
@@ -281,6 +304,33 @@ func (s *Scheduler) CheckWorkerHealth(timeout time.Duration) {
 		s.logger.Warn("Worker marked inactive",
 			zap.String("worker_id", workerID),
 		)
+	}
+}
+
+// SetSchedulingPolicy sets the scheduling policy for job assignment
+func (s *Scheduler) SetSchedulingPolicy(policy SchedulingPolicy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.policy = policy
+	s.logger.Info("Scheduling policy updated", zap.String("policy", getPolicyName(policy)))
+}
+
+// getPolicyName returns a human-readable name for the policy
+func getPolicyName(policy SchedulingPolicy) string {
+	switch policy.(type) {
+	case *RoundRobinPolicy:
+		return "round-robin"
+	case *LeastLoadedPolicy:
+		return "least-loaded"
+	case *PriorityPolicy:
+		return "priority"
+	case *RandomPolicy:
+		return "random"
+	case *CapacityAwarePolicy:
+		return "capacity-aware"
+	default:
+		return "unknown"
 	}
 }
 

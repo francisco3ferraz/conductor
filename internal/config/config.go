@@ -50,6 +50,7 @@ type WorkerConfig struct {
 
 type SchedulerConfig struct {
 	AssignmentStrategy string        `mapstructure:"assignment_strategy"`
+	SchedulingPolicy   string        `mapstructure:"scheduling_policy"` // round-robin, least-loaded, priority, random, capacity-aware
 	JobTimeout         time.Duration `mapstructure:"job_timeout"`
 	MaxRetries         int           `mapstructure:"max_retries"`
 }
@@ -139,6 +140,7 @@ func setDefaults(v *viper.Viper) {
 
 	// Scheduler defaults
 	v.SetDefault("scheduler.assignment_strategy", "least_loaded")
+	v.SetDefault("scheduler.scheduling_policy", "least-loaded") // round-robin, least-loaded, priority, random, capacity-aware
 	v.SetDefault("scheduler.job_timeout", "5m")
 	v.SetDefault("scheduler.max_retries", 3)
 

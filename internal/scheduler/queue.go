@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"sort"
+
 	"github.com/francisco3ferraz/conductor/internal/job"
 )
 
@@ -16,10 +18,19 @@ func NewJobQueue() *JobQueue {
 	}
 }
 
-// Enqueue adds a job to the queue
+// Enqueue adds a job to the queue and maintains priority order
 func (q *JobQueue) Enqueue(j *job.Job) {
 	q.jobs = append(q.jobs, j)
-	// TODO: Sort by priority for priority queue behavior
+
+	// Sort by priority (higher priority first), then by creation time (older first)
+	sort.SliceStable(q.jobs, func(i, j int) bool {
+		// Higher priority comes first
+		if q.jobs[i].Priority != q.jobs[j].Priority {
+			return q.jobs[i].Priority > q.jobs[j].Priority
+		}
+		// If same priority, older jobs (earlier CreatedAt) come first
+		return q.jobs[i].CreatedAt.Before(q.jobs[j].CreatedAt)
+	})
 }
 
 // Dequeue removes and returns the next job from the queue

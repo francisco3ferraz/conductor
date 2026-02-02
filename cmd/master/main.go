@@ -148,6 +148,10 @@ func main() {
 	// Create and start scheduler
 	sched := scheduler.NewScheduler(raftNode, fsm, logger)
 
+	// Configure scheduling policy based on config
+	policy := getSchedulingPolicy(cfg.Scheduler.SchedulingPolicy, logger)
+	sched.SetSchedulingPolicy(policy)
+
 	// Set job store for recovery manager
 	sched.SetJobStore(store)
 
@@ -345,5 +349,29 @@ func clusterStatusHandler(logger *zap.Logger, raftNode *consensus.RaftNode) http
 			logger.Error("Failed to encode cluster status", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
 		}
+	}
+}
+
+// getSchedulingPolicy creates a scheduling policy based on the configured name
+func getSchedulingPolicy(policyName string, logger *zap.Logger) scheduler.SchedulingPolicy {
+	switch policyName {
+	case "round-robin":
+		logger.Info("Using round-robin scheduling policy")
+		return scheduler.NewRoundRobinPolicy()
+	case "least-loaded":
+		logger.Info("Using least-loaded scheduling policy")
+		return scheduler.NewLeastLoadedPolicy()
+	case "priority":
+		logger.Info("Using priority scheduling policy")
+		return scheduler.NewPriorityPolicy()
+	case "random":
+		logger.Info("Using random scheduling policy")
+		return scheduler.NewRandomPolicy()
+	case "capacity-aware":
+		logger.Info("Using capacity-aware scheduling policy")
+		return scheduler.NewCapacityAwarePolicy()
+	default:
+		logger.Warn("Unknown scheduling policy, using least-loaded", zap.String("policy", policyName))
+		return scheduler.NewLeastLoadedPolicy()
 	}
 }
