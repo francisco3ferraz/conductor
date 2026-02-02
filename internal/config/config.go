@@ -125,6 +125,16 @@ func Load(configPath string) (*Config, error) {
 	v.BindEnv("cluster.bootstrap", "BOOTSTRAP")
 	v.BindEnv("cluster.join_addr", "JOIN_ADDR")
 
+	// Security environment variables
+	v.BindEnv("security.tls.enabled", "SECURITY_TLS_ENABLED")
+	v.BindEnv("security.tls.auto_generate", "SECURITY_TLS_AUTO_GENERATE")
+	v.BindEnv("security.tls.skip_verify", "SECURITY_TLS_SKIP_VERIFY")
+	v.BindEnv("security.jwt.skip_expiry", "SECURITY_JWT_SKIP_EXPIRY")
+	v.BindEnv("security.rbac.enabled", "SECURITY_RBAC_ENABLED")
+	v.BindEnv("security.raft_tls.enabled", "SECURITY_RAFT_TLS_ENABLED")
+	v.BindEnv("security.raft_tls.auto_generate", "SECURITY_RAFT_TLS_AUTO_GENERATE")
+	v.BindEnv("security.raft_tls.skip_verify", "SECURITY_RAFT_TLS_SKIP_VERIFY")
+
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)

@@ -85,22 +85,32 @@ func NewRaftNode(cfg *Config, fsm *FSM, logger *zap.Logger) (*RaftNode, error) {
 		return nil, fmt.Errorf("failed to create snapshot store: %w", err)
 	}
 
-	// Set up transport
+	// Set up transport with TLS support
 	addr, err := net.ResolveTCPAddr("tcp", cfg.BindAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve bind address: %w", err)
 	}
 
-	// Create transport (TLS is handled at connection level if provided)
+	var transport *raft.NetworkTransport
 	if cfg.TLSConfig != nil {
 		logger.Info("Raft: TLS encryption configured for cluster communication")
+
+		// Create TLS stream layer
+		streamLayer, err := newTLSStreamLayer(cfg.BindAddr, cfg.TLSConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create TLS stream layer: %w", err)
+		}
+
+		// Create network transport with TLS stream layer
+		transport = raft.NewNetworkTransport(streamLayer, 3, 10*time.Second, os.Stderr)
 	} else {
 		logger.Warn("Raft: TLS encryption DISABLED - NOT FOR PRODUCTION")
-	}
 
-	transport, err := raft.NewTCPTransport(cfg.BindAddr, addr, 3, 10*time.Second, os.Stderr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create transport: %w", err)
+		// Create standard TCP transport
+		transport, err = raft.NewTCPTransport(cfg.BindAddr, addr, 3, 10*time.Second, os.Stderr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create transport: %w", err)
+		}
 	}
 	rn.transport = transport
 
@@ -254,4 +264,47 @@ func (rn *RaftNode) LastIndex() uint64 {
 // AppliedIndex returns the last index applied to the FSM
 func (rn *RaftNode) AppliedIndex() uint64 {
 	return rn.raft.AppliedIndex()
+}
+
+// tlsStreamLayer implements raft.StreamLayer with TLS support
+type tlsStreamLayer struct {
+	listener  net.Listener
+	tlsConfig *tls.Config
+}
+
+// newTLSStreamLayer creates a new TLS-enabled stream layer
+func newTLSStreamLayer(bindAddr string, tlsConfig *tls.Config) (*tlsStreamLayer, error) {
+	listener, err := net.Listen("tcp", bindAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create listener: %w", err)
+	}
+
+	// Wrap with TLS listener
+	tlsListener := tls.NewListener(listener, tlsConfig)
+
+	return &tlsStreamLayer{
+		listener:  tlsListener,
+		tlsConfig: tlsConfig,
+	}, nil
+}
+
+// Accept waits for and returns the next connection to the listener
+func (t *tlsStreamLayer) Accept() (net.Conn, error) {
+	return t.listener.Accept()
+}
+
+// Close closes the listener
+func (t *tlsStreamLayer) Close() error {
+	return t.listener.Close()
+}
+
+// Addr returns the listener's network address
+func (t *tlsStreamLayer) Addr() net.Addr {
+	return t.listener.Addr()
+}
+
+// Dial creates an outgoing TLS connection
+func (t *tlsStreamLayer) Dial(address raft.ServerAddress, timeout time.Duration) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout}
+	return tls.DialWithDialer(dialer, "tcp", string(address), t.tlsConfig)
 }
