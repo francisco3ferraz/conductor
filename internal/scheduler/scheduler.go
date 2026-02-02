@@ -180,12 +180,23 @@ func (s *Scheduler) schedulePendingJobs() {
 
 		// Now actually send the job to the worker via gRPC
 		if err := s.sendJobToWorker(j, worker); err != nil {
-			s.logger.Error("Failed to send job to worker",
+			s.logger.Error("Failed to send job to worker, rolling back assignment",
 				zap.String("job_id", j.ID),
 				zap.String("worker_id", worker.ID),
 				zap.Error(err),
 			)
-			// Job will be reassigned on next scheduling cycle
+
+			// CRITICAL: Rollback the Raft assignment to prevent orphaned jobs
+			if rollbackErr := s.applier.UnassignJob(j.ID); rollbackErr != nil {
+				s.logger.Error("Failed to rollback job assignment - job may be orphaned",
+					zap.String("job_id", j.ID),
+					zap.Error(rollbackErr),
+				)
+			} else {
+				s.logger.Debug("Successfully rolled back job assignment",
+					zap.String("job_id", j.ID),
+				)
+			}
 			continue
 		}
 

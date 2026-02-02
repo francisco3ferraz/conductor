@@ -25,6 +25,7 @@ type FSM struct {
 const (
 	CommandSubmitJob      = "submit_job"
 	CommandAssignJob      = "assign_job"
+	CommandUnassignJob    = "unassign_job"
 	CommandCompleteJob    = "complete_job"
 	CommandFailJob        = "fail_job"
 	CommandRegisterWorker = "register_worker"
@@ -46,6 +47,11 @@ type SubmitJobPayload struct {
 type AssignJobPayload struct {
 	JobID    string `json:"job_id"`
 	WorkerID string `json:"worker_id"`
+}
+
+// UnassignJobPayload is the payload for unassigning a job (rollback)
+type UnassignJobPayload struct {
+	JobID string `json:"job_id"`
 }
 
 // CompleteJobPayload is the payload for completing a job
@@ -95,6 +101,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applySubmitJob(cmd.Payload)
 	case CommandAssignJob:
 		return f.applyAssignJob(cmd.Payload)
+	case CommandUnassignJob:
+		return f.applyUnassignJob(cmd.Payload)
 	case CommandCompleteJob:
 		return f.applyCompleteJob(cmd.Payload)
 	case CommandFailJob:
@@ -139,6 +147,34 @@ func (f *FSM) applyAssignJob(payload json.RawMessage) interface{} {
 	f.logger.Debug("Job assigned",
 		zap.String("job_id", p.JobID),
 		zap.String("worker_id", p.WorkerID))
+	return nil
+}
+
+func (f *FSM) applyUnassignJob(payload json.RawMessage) interface{} {
+	var p UnassignJobPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return err
+	}
+
+	j, exists := f.jobs[p.JobID]
+	if !exists {
+		return fmt.Errorf("job not found: %s", p.JobID)
+	}
+
+	// Only unassign if currently assigned (prevents double unassign)
+	if j.Status != job.StatusAssigned {
+		f.logger.Warn("Attempted to unassign job not in assigned status",
+			zap.String("job_id", p.JobID),
+			zap.String("current_status", j.Status.String()))
+		return nil // Not an error, just a no-op
+	}
+
+	// Reset job to pending state for reassignment
+	j.Status = job.StatusPending
+	j.AssignedTo = ""
+
+	f.logger.Debug("Job unassigned (rollback)",
+		zap.String("job_id", p.JobID))
 	return nil
 }
 

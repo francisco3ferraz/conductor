@@ -62,6 +62,28 @@ func (a *ApplyCommand) AssignJob(jobID, workerID string) error {
 	return a.raft.Apply(cmdBytes, 10*time.Second)
 }
 
+// UnassignJob unassigns a job from a worker (rollback operation)
+func (a *ApplyCommand) UnassignJob(jobID string) error {
+	payload, err := json.Marshal(UnassignJobPayload{
+		JobID: jobID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	cmd := Command{
+		Type:    CommandUnassignJob,
+		Payload: payload,
+	}
+
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal command: %w", err)
+	}
+
+	return a.raft.Apply(cmdBytes, 10*time.Second)
+}
+
 // CompleteJob marks a job as completed
 func (a *ApplyCommand) CompleteJob(jobID string, result *job.Result) error {
 	payload, err := json.Marshal(CompleteJobPayload{
