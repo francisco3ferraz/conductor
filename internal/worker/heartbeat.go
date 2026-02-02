@@ -70,7 +70,7 @@ func (h *HeartbeatSender) Stop() {
 
 // send sends a single heartbeat to the master
 func (h *HeartbeatSender) send(ctx context.Context) error {
-	client := proto.NewWorkerServiceClient(h.conn)
+	client := proto.NewMasterServiceClient(h.conn)
 
 	sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

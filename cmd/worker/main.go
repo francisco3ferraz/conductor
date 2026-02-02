@@ -96,11 +96,10 @@ func main() {
 		)
 
 		// Report result to master via gRPC
-		workerSvcClient := proto.NewWorkerServiceClient(workerClient.GetConn())
 		reportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 
-		resp, err := workerSvcClient.ReportResult(reportCtx, &proto.ReportResultRequest{
+		resp, err := workerClient.Client.ReportResult(reportCtx, &proto.ReportResultRequest{
 			JobId:    jobID,
 			WorkerId: cfg.Worker.WorkerID,
 			Result: &proto.JobResult{

@@ -6,13 +6,18 @@ option go_package = "github.com/francisco3ferraz/conductor/api/proto";
 
 import "google/protobuf/timestamp.proto";
 
-// MasterService handles job submission and status queries
+// MasterService handles job submission, status queries, and worker communication
 service MasterService {
   rpc SubmitJob(SubmitJobRequest) returns (SubmitJobResponse);
   rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
   rpc JoinCluster(JoinClusterRequest) returns (JoinClusterResponse);
+  
+  // Worker communication (worker → master)
+  rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
 }
 
 // Job submission request
@@ -95,4 +100,46 @@ message JoinClusterResponse {
   bool success = 1;
   string message = 2;
   string leader = 3;   // Current leader address
+}
+
+// Worker communication messages (worker → master)
+message RegisterWorkerRequest {
+  string worker_id = 1;
+  string address = 2;
+  int32 max_concurrent_jobs = 3;
+  map<string, string> capabilities = 4;  // Worker capabilities/tags
+}
+
+message RegisterWorkerResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message HeartbeatRequest {
+  string worker_id = 1;
+  WorkerStats stats = 2;
+}
+
+message HeartbeatResponse {
+  bool ack = 1;
+  int32 assigned_jobs_count = 2;  // Number of jobs assigned to this worker
+}
+
+message WorkerStats {
+  int32 active_jobs = 1;
+  int32 completed_jobs = 2;
+  int32 failed_jobs = 3;
+  double cpu_usage = 4;
+  double memory_usage = 5;
+}
+
+message ReportResultRequest {
+  string job_id = 1;
+  string worker_id = 2;
+  JobResult result = 3;
+}
+
+message ReportResultResponse {
+  bool success = 1;
+  string message = 2;
 }

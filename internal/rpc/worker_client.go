@@ -77,13 +77,10 @@ func (w *WorkerClient) Register(ctx context.Context, maxJobs int32, address stri
 		zap.String("address", address),
 	)
 
-	// Create a worker service client from the master connection
-	workerSvcClient := proto.NewWorkerServiceClient(w.conn)
-
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	resp, err := workerSvcClient.RegisterWorker(ctx, &proto.RegisterWorkerRequest{
+	resp, err := w.Client.RegisterWorker(ctx, &proto.RegisterWorkerRequest{
 		WorkerId:          w.workerID,
 		Address:           address,
 		MaxConcurrentJobs: maxJobs,
@@ -146,13 +143,10 @@ func (w *WorkerClient) reportSuccess(ctx context.Context, jobID string, result *
 		zap.Int64("duration_ms", result.DurationMs),
 	)
 
-	// Create a worker service client from the master connection
-	workerSvcClient := proto.NewWorkerServiceClient(w.conn)
-
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	resp, err := workerSvcClient.ReportResult(ctx, &proto.ReportResultRequest{
+	resp, err := w.Client.ReportResult(ctx, &proto.ReportResultRequest{
 		JobId:    jobID,
 		WorkerId: w.workerID,
 		Result: &proto.JobResult{
@@ -179,13 +173,10 @@ func (w *WorkerClient) reportFailure(ctx context.Context, jobID string, errMsg s
 		zap.String("error", errMsg),
 	)
 
-	// Create a worker service client from the master connection
-	workerSvcClient := proto.NewWorkerServiceClient(w.conn)
-
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	resp, err := workerSvcClient.ReportResult(ctx, &proto.ReportResultRequest{
+	resp, err := w.Client.ReportResult(ctx, &proto.ReportResultRequest{
 		JobId:    jobID,
 		WorkerId: w.workerID,
 		Result: &proto.JobResult{
