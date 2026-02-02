@@ -61,86 +61,6 @@ func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.
 	return s
 }
 
-// assignPendingJobs finds and assigns pending jobs to available workers
-func (s *Scheduler) assignPendingJobs() {
-	// Get pending jobs from FSM
-	jobs := s.fsm.ListJobs()
-	var pendingJobs []*job.Job
-
-	for _, j := range jobs {
-		if j.Status == job.StatusPending {
-			pendingJobs = append(pendingJobs, j)
-		}
-	}
-
-	if len(pendingJobs) == 0 {
-		return
-	}
-
-	// Sort pending jobs by priority (higher priority first)
-	queue := NewJobQueue()
-	for _, j := range pendingJobs {
-		queue.Enqueue(j)
-	}
-
-	s.logger.Debug("Found pending jobs", zap.Int("count", len(pendingJobs)))
-
-	// Get available workers
-	workers := s.registry.List()
-	availableWorkers := make([]*worker.WorkerInfo, 0)
-
-	for _, w := range workers {
-		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
-			availableWorkers = append(availableWorkers, w)
-		}
-	}
-
-	if len(availableWorkers) == 0 {
-		s.logger.Debug("No available workers")
-		return
-	}
-
-	// Assign jobs using the configured scheduling policy
-	for !queue.IsEmpty() {
-		j := queue.Dequeue()
-
-		// Re-check available workers (capacity may have changed)
-		availableWorkers = make([]*worker.WorkerInfo, 0)
-		for _, w := range s.registry.List() {
-			if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
-				availableWorkers = append(availableWorkers, w)
-			}
-		}
-
-		if len(availableWorkers) == 0 {
-			s.logger.Debug("No more available workers")
-			break
-		}
-
-		// Use policy to select worker
-		w := s.policy.SelectWorker(j, availableWorkers)
-		if w == nil {
-			s.logger.Warn("Policy returned no worker for job", zap.String("job_id", j.ID))
-			continue
-		}
-
-		if err := s.applier.AssignJob(j.ID, w.ID); err != nil {
-			s.logger.Error("Failed to assign job",
-				zap.String("job_id", j.ID),
-				zap.String("worker_id", w.ID),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		s.logger.Info("Job assigned",
-			zap.String("job_id", j.ID),
-			zap.String("worker_id", w.ID),
-			zap.Int("priority", j.Priority),
-		)
-	}
-}
-
 // Start starts the scheduler background loop
 func (s *Scheduler) Start(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
@@ -196,25 +116,55 @@ func (s *Scheduler) schedulePendingJobs() {
 	// Get all jobs from FSM
 	jobs := s.fsm.ListJobs()
 
-	// Find pending jobs
-	var pendingJobs []*job.Job
+	// Find pending jobs and add to priority queue
+	queue := NewJobQueue()
 	for _, j := range jobs {
 		if j.Status == job.StatusPending {
-			pendingJobs = append(pendingJobs, j)
+			queue.Enqueue(j)
 		}
 	}
 
-	if len(pendingJobs) == 0 {
+	if queue.IsEmpty() {
 		return
 	}
 
-	s.logger.Debug("Scheduling pending jobs", zap.Int("count", len(pendingJobs)))
+	s.logger.Debug("Scheduling pending jobs", zap.Int("count", queue.Size()))
 
-	// Assign each pending job to an available worker
-	for _, j := range pendingJobs {
-		worker := s.findAvailableWorker()
+	// Get available workers
+	workers := s.registry.List()
+	availableWorkers := make([]*worker.WorkerInfo, 0)
+	for _, w := range workers {
+		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+			availableWorkers = append(availableWorkers, w)
+		}
+	}
+
+	if len(availableWorkers) == 0 {
+		s.logger.Debug("No available workers")
+		return
+	}
+
+	// Process jobs from priority queue using configured scheduling policy
+	for !queue.IsEmpty() {
+		j := queue.Dequeue()
+
+		// Re-check available workers (capacity may have changed)
+		availableWorkers = make([]*worker.WorkerInfo, 0)
+		for _, w := range s.registry.List() {
+			if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
+				availableWorkers = append(availableWorkers, w)
+			}
+		}
+
+		if len(availableWorkers) == 0 {
+			s.logger.Debug("No more available workers")
+			break
+		}
+
+		// Use configured policy to select best worker for this job
+		worker := s.policy.SelectWorker(j, availableWorkers)
 		if worker == nil {
-			s.logger.Debug("No available workers", zap.String("job_id", j.ID))
+			s.logger.Warn("Policy returned no worker for job", zap.String("job_id", j.ID))
 			continue
 		}
 
@@ -235,7 +185,7 @@ func (s *Scheduler) schedulePendingJobs() {
 				zap.String("worker_id", worker.ID),
 				zap.Error(err),
 			)
-			// TODO: Mark job as pending again for retry
+			// Job will be reassigned on next scheduling cycle
 			continue
 		}
 
@@ -247,11 +197,11 @@ func (s *Scheduler) schedulePendingJobs() {
 		s.logger.Info("Job assigned to worker",
 			zap.String("job_id", j.ID),
 			zap.String("worker_id", worker.ID),
+			zap.Int("priority", j.Priority),
 		)
 	}
 }
 
-// sendJobToWorker sends a job to a worker via gRPC
 // RegisterWorker registers a new worker
 func (s *Scheduler) RegisterWorker(id, address string, maxJobs int) {
 	// Register in local registry
@@ -352,7 +302,7 @@ func (s *Scheduler) SetJobStore(jobStore storage.Store) {
 func (s *Scheduler) TriggerAssignment() error {
 	// This method is called by the recovery manager to reassign jobs
 	// We'll trigger the assignment loop manually
-	go s.assignPendingJobs()
+	go s.schedulePendingJobs()
 	return nil
 }
 

@@ -18,7 +18,7 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "node-1", cfg.Cluster.NodeID)
 	assert.Equal(t, "127.0.0.1:7000", cfg.Cluster.BindAddr)
 	assert.Equal(t, 9000, cfg.GRPC.MasterPort)
-	assert.Equal(t, "least_loaded", cfg.Scheduler.AssignmentStrategy)
+	assert.Equal(t, "least-loaded", cfg.Scheduler.SchedulingPolicy)
 }
 
 func TestLoadFromFile(t *testing.T) {
