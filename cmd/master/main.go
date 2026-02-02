@@ -143,6 +143,7 @@ func main() {
 	mux.HandleFunc("/health", healthHandler(logger))
 	mux.HandleFunc("/ready", readyHandler(logger, store))
 	mux.HandleFunc("/failover/status", failoverStatusHandler(logger, sched))
+	mux.HandleFunc("/cluster/status", clusterStatusHandler(logger, raftNode))
 
 	httpServer := &http.Server{
 		Addr:    ":8080",
@@ -266,6 +267,44 @@ func failoverStatusHandler(logger *zap.Logger, sched *scheduler.Scheduler) http.
 		// Write JSON response
 		if err := json.NewEncoder(w).Encode(status); err != nil {
 			logger.Error("Failed to encode failover status", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}
+}
+
+func clusterStatusHandler(logger *zap.Logger, raftNode *consensus.RaftNode) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		status := map[string]interface{}{
+			"state":  raftNode.State().String(),
+			"leader": raftNode.Leader(),
+		}
+
+		// Get cluster configuration
+		config, err := raftNode.GetConfiguration()
+		if err != nil {
+			logger.Error("Failed to get Raft configuration", zap.Error(err))
+			status["error"] = err.Error()
+		} else {
+			servers := make([]map[string]string, 0, len(config.Servers))
+			for _, server := range config.Servers {
+				servers = append(servers, map[string]string{
+					"id":       string(server.ID),
+					"address":  string(server.Address),
+					"suffrage": server.Suffrage.String(),
+				})
+			}
+			status["servers"] = servers
+		}
+
+		// Add Raft stats
+		stats := raftNode.Stats()
+		status["stats"] = stats
+
+		// Write JSON response
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			logger.Error("Failed to encode cluster status", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}

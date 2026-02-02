@@ -30,16 +30,18 @@ type MasterServer struct {
 	fsm       *consensus.FSM
 	applier   *consensus.ApplyCommand
 	scheduler Scheduler
+	forwarder *ClientForwarder
 	logger    *zap.Logger
 }
 
 // NewMasterServer creates a new master gRPC server
 func NewMasterServer(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.Logger) *MasterServer {
 	return &MasterServer{
-		raftNode: raftNode,
-		fsm:      fsm,
-		applier:  consensus.NewApplyCommand(raftNode),
-		logger:   logger,
+		raftNode:  raftNode,
+		fsm:       fsm,
+		applier:   consensus.NewApplyCommand(raftNode),
+		forwarder: NewClientForwarder(logger),
+		logger:    logger,
 	}
 }
 
@@ -53,11 +55,19 @@ func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobReques
 	// Check if we're the leader
 	if !s.raftNode.IsLeader() {
 		leader := s.raftNode.Leader()
-		return &proto.SubmitJobResponse{
-			JobId:   "",
-			Status:  "error",
-			Message: fmt.Sprintf("not leader, redirect to %s", leader),
-		}, nil
+		if leader == "" {
+			return &proto.SubmitJobResponse{
+				JobId:   "",
+				Status:  "error",
+				Message: "no leader available",
+			}, fmt.Errorf("no leader available")
+		}
+
+		// Forward request to leader
+		s.logger.Info("Forwarding SubmitJob to leader",
+			zap.String("leader", leader),
+		)
+		return s.forwarder.ForwardSubmitJob(ctx, leader, req)
 	}
 
 	// Parse job type
@@ -191,10 +201,19 @@ func (s *MasterServer) CancelJob(ctx context.Context, req *proto.CancelJobReques
 	// Check if we're the leader
 	if !s.raftNode.IsLeader() {
 		leader := s.raftNode.Leader()
-		return &proto.CancelJobResponse{
-			Success: false,
-			Message: fmt.Sprintf("not leader, redirect to %s", leader),
-		}, nil
+		if leader == "" {
+			return &proto.CancelJobResponse{
+				Success: false,
+				Message: "no leader available",
+			}, fmt.Errorf("no leader available")
+		}
+
+		// Forward request to leader
+		s.logger.Info("Forwarding CancelJob to leader",
+			zap.String("leader", leader),
+			zap.String("job_id", req.JobId),
+		)
+		return s.forwarder.ForwardCancelJob(ctx, leader, req)
 	}
 
 	// Verify job exists

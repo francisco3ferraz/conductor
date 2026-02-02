@@ -171,3 +171,47 @@ func (rn *RaftNode) WaitForLeader(timeout time.Duration) error {
 
 	return fmt.Errorf("no leader elected within timeout")
 }
+
+// AddVoter adds a new voting member to the Raft cluster
+func (rn *RaftNode) AddVoter(id, address string, prevIndex uint64, timeout time.Duration) error {
+	rn.logger.Info("Adding voter to cluster",
+		zap.String("node_id", id),
+		zap.String("address", address),
+	)
+
+	future := rn.raft.AddVoter(raft.ServerID(id), raft.ServerAddress(address), prevIndex, timeout)
+	if err := future.Error(); err != nil {
+		return fmt.Errorf("failed to add voter: %w", err)
+	}
+
+	return nil
+}
+
+// RemoveServer removes a server from the Raft cluster
+func (rn *RaftNode) RemoveServer(id string, prevIndex uint64, timeout time.Duration) error {
+	rn.logger.Info("Removing server from cluster",
+		zap.String("node_id", id),
+	)
+
+	future := rn.raft.RemoveServer(raft.ServerID(id), prevIndex, timeout)
+	if err := future.Error(); err != nil {
+		return fmt.Errorf("failed to remove server: %w", err)
+	}
+
+	return nil
+}
+
+// GetConfiguration returns the current Raft cluster configuration
+func (rn *RaftNode) GetConfiguration() (raft.Configuration, error) {
+	future := rn.raft.GetConfiguration()
+	if err := future.Error(); err != nil {
+		return raft.Configuration{}, fmt.Errorf("failed to get configuration: %w", err)
+	}
+
+	return future.Configuration(), nil
+}
+
+// State returns the current Raft state
+func (rn *RaftNode) State() raft.RaftState {
+	return rn.raft.State()
+}
