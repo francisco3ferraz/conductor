@@ -27,6 +27,7 @@ type Config struct {
 	BindAddr  string
 	DataDir   string
 	Bootstrap bool
+	JoinAddr  string // Address of existing node to join
 
 	// Raft timeouts
 	HeartbeatTimeout time.Duration
@@ -111,6 +112,14 @@ func NewRaftNode(cfg *Config, fsm *FSM, logger *zap.Logger) (*RaftNode, error) {
 		}
 		rn.raft.BootstrapCluster(configuration)
 		logger.Info("Bootstrapped Raft cluster", zap.String("node_id", cfg.NodeID))
+	} else if cfg.JoinAddr != "" {
+		// Join existing cluster
+		logger.Info("Attempting to join existing cluster",
+			zap.String("node_id", cfg.NodeID),
+			zap.String("join_addr", cfg.JoinAddr),
+		)
+		// The actual join happens via RPC call to the existing cluster
+		// This is handled externally after node creation
 	}
 
 	return rn, nil
@@ -214,4 +223,24 @@ func (rn *RaftNode) GetConfiguration() (raft.Configuration, error) {
 // State returns the current Raft state
 func (rn *RaftNode) State() raft.RaftState {
 	return rn.raft.State()
+}
+
+// Barrier ensures all preceding operations are applied before returning
+// This is useful for read-your-writes consistency
+func (rn *RaftNode) Barrier(timeout time.Duration) error {
+	future := rn.raft.Barrier(timeout)
+	if err := future.Error(); err != nil {
+		return fmt.Errorf("barrier failed: %w", err)
+	}
+	return nil
+}
+
+// LastIndex returns the last applied index
+func (rn *RaftNode) LastIndex() uint64 {
+	return rn.raft.LastIndex()
+}
+
+// AppliedIndex returns the last index applied to the FSM
+func (rn *RaftNode) AppliedIndex() uint64 {
+	return rn.raft.AppliedIndex()
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/scheduler"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -64,7 +65,8 @@ func main() {
 		NodeID:            cfg.Cluster.NodeID,
 		BindAddr:          cfg.Cluster.BindAddr,
 		DataDir:           cfg.Cluster.RaftDir,
-		Bootstrap:         true, // TODO: make this configurable for multi-node setups
+		Bootstrap:         cfg.Cluster.Bootstrap,
+		JoinAddr:          cfg.Cluster.JoinAddr,
 		HeartbeatTimeout:  cfg.Raft.HeartbeatTimeout,
 		ElectionTimeout:   cfg.Raft.ElectionTimeout,
 		SnapshotInterval:  cfg.Raft.SnapshotInterval,
@@ -80,7 +82,43 @@ func main() {
 	logger.Info("Raft node initialized",
 		zap.String("node_id", raftConfig.NodeID),
 		zap.String("bind_addr", raftConfig.BindAddr),
+		zap.Bool("bootstrap", raftConfig.Bootstrap),
 	)
+
+	// If joining existing cluster, send join request
+	if !cfg.Cluster.Bootstrap && cfg.Cluster.JoinAddr != "" {
+		logger.Info("Joining existing cluster",
+			zap.String("join_addr", cfg.Cluster.JoinAddr),
+		)
+
+		// Create gRPC client to join
+		conn, err := grpc.DialContext(context.Background(), cfg.Cluster.JoinAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithBlock(),
+			grpc.WithTimeout(10*time.Second),
+		)
+		if err != nil {
+			logger.Fatal("Failed to connect to cluster", zap.Error(err))
+		}
+		defer conn.Close()
+
+		client := proto.NewMasterServiceClient(conn)
+		resp, err := client.JoinCluster(context.Background(), &proto.JoinClusterRequest{
+			NodeId:  cfg.Cluster.NodeID,
+			Address: cfg.Cluster.BindAddr,
+		})
+		if err != nil {
+			logger.Fatal("Failed to join cluster", zap.Error(err))
+		}
+
+		if !resp.Success {
+			logger.Fatal("Join rejected", zap.String("message", resp.Message))
+		}
+
+		logger.Info("Successfully joined cluster",
+			zap.String("leader", resp.Leader),
+		)
+	}
 
 	// Wait for leader election
 	if err := raftNode.WaitForLeader(30 * time.Second); err != nil {

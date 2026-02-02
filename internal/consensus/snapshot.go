@@ -1,6 +1,8 @@
 package consensus
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 
@@ -16,20 +18,27 @@ type FSMSnapshot struct {
 	workers map[string]*storage.WorkerInfo
 }
 
-// Persist writes the snapshot to the given sink
+// Persist writes the snapshot to the given sink with gzip compression
 func (s *FSMSnapshot) Persist(sink raft.SnapshotSink) error {
 	err := func() error {
+		// Create gzip writer for compression
+		gzWriter := gzip.NewWriter(sink)
+		defer gzWriter.Close()
+
 		// Encode data as JSON
-		b, err := json.Marshal(map[string]interface{}{
+		data := map[string]interface{}{
 			"jobs":    s.jobs,
 			"workers": s.workers,
-		})
-		if err != nil {
+		}
+
+		// Use JSON encoder for streaming (more memory efficient than Marshal)
+		encoder := json.NewEncoder(gzWriter)
+		if err := encoder.Encode(data); err != nil {
 			return err
 		}
 
-		// Write to the sink
-		if _, err := sink.Write(b); err != nil {
+		// Ensure all data is flushed to gzip writer
+		if err := gzWriter.Close(); err != nil {
 			return err
 		}
 
@@ -70,16 +79,54 @@ func (f *FSM) CreateSnapshot() (*FSMSnapshot, error) {
 	}, nil
 }
 
-// RestoreFromSnapshot restores the FSM from a snapshot
+// RestoreFromSnapshot restores the FSM from a compressed snapshot
 func (f *FSM) RestoreFromSnapshot(rc io.ReadCloser) error {
 	defer rc.Close()
+
+	// Create gzip reader for decompression
+	gzReader, err := gzip.NewReader(rc)
+	if err != nil {
+		// If gzip fails, might be old uncompressed snapshot - try direct decode
+		f.logger.Warn("Failed to create gzip reader, trying uncompressed restore", zap.Error(err))
+
+		// Reset reader by creating a new one from the buffered content
+		// This is a fallback for backward compatibility
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, rc); err != nil {
+			return err
+		}
+
+		var snapshot struct {
+			Jobs    map[string]*job.Job            `json:"jobs"`
+			Workers map[string]*storage.WorkerInfo `json:"workers"`
+		}
+
+		if err := json.NewDecoder(&buf).Decode(&snapshot); err != nil {
+			return err
+		}
+
+		f.mu.Lock()
+		defer f.mu.Unlock()
+
+		f.jobs = snapshot.Jobs
+		f.workers = snapshot.Workers
+
+		f.logger.Info("Restored from uncompressed snapshot",
+			zap.Int("jobs", len(f.jobs)),
+			zap.Int("workers", len(f.workers)))
+
+		return nil
+	}
+	defer gzReader.Close()
 
 	var snapshot struct {
 		Jobs    map[string]*job.Job            `json:"jobs"`
 		Workers map[string]*storage.WorkerInfo `json:"workers"`
 	}
 
-	if err := json.NewDecoder(rc).Decode(&snapshot); err != nil {
+	// Use streaming decoder for memory efficiency
+	decoder := json.NewDecoder(gzReader)
+	if err := decoder.Decode(&snapshot); err != nil {
 		return err
 	}
 
@@ -89,7 +136,7 @@ func (f *FSM) RestoreFromSnapshot(rc io.ReadCloser) error {
 	f.jobs = snapshot.Jobs
 	f.workers = snapshot.Workers
 
-	f.logger.Info("Restored from snapshot",
+	f.logger.Info("Restored from compressed snapshot",
 		zap.Int("jobs", len(f.jobs)),
 		zap.Int("workers", len(f.workers)))
 

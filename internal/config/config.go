@@ -19,10 +19,12 @@ type Config struct {
 }
 
 type ClusterConfig struct {
-	NodeID   string `mapstructure:"node_id"`
-	BindAddr string `mapstructure:"bind_addr"`
-	RaftDir  string `mapstructure:"raft_dir"`
-	DataDir  string `mapstructure:"data_dir"`
+	NodeID    string `mapstructure:"node_id"`
+	BindAddr  string `mapstructure:"bind_addr"`
+	RaftDir   string `mapstructure:"raft_dir"`
+	DataDir   string `mapstructure:"data_dir"`
+	Bootstrap bool   `mapstructure:"bootstrap"`
+	JoinAddr  string `mapstructure:"join_addr"` // Address of existing cluster member to join
 }
 
 type RaftConfig struct {
@@ -91,6 +93,8 @@ func Load(configPath string) (*Config, error) {
 	v.BindEnv("cluster.node_id", "NODE_ID")
 	v.BindEnv("cluster.bind_addr", "BIND_ADDR")
 	v.BindEnv("cluster.raft_dir", "RAFT_DIR")
+	v.BindEnv("cluster.bootstrap", "BOOTSTRAP")
+	v.BindEnv("cluster.join_addr", "JOIN_ADDR")
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -112,12 +116,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cluster.bind_addr", "127.0.0.1:7000")
 	v.SetDefault("cluster.raft_dir", "/tmp/conductor/raft")
 	v.SetDefault("cluster.data_dir", "/tmp/conductor/data")
+	v.SetDefault("cluster.bootstrap", true)
+	v.SetDefault("cluster.join_addr", "")
 
 	// Raft defaults
 	v.SetDefault("raft.heartbeat_timeout", "1s")
 	v.SetDefault("raft.election_timeout", "1s")
 	v.SetDefault("raft.snapshot_interval", "120s")
-	v.SetDefault("raft.snapshot_threshold", 8192)
+	v.SetDefault("raft.snapshot_threshold", 8192) // Snapshot after 8K log entries (optimized for production)
 
 	// gRPC defaults
 	v.SetDefault("grpc.master_port", 9000)

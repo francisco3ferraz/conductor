@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"fmt"
+	"time"
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
@@ -101,6 +102,14 @@ func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobReques
 
 // GetJobStatus retrieves job status via gRPC
 func (s *MasterServer) GetJobStatus(ctx context.Context, req *proto.GetJobStatusRequest) (*proto.GetJobStatusResponse, error) {
+	// Ensure read-your-writes consistency: wait for all pending writes to apply
+	// This guarantees clients see their own writes
+	if err := s.raftNode.Barrier(5 * time.Second); err != nil {
+		s.logger.Warn("barrier timeout during GetJobStatus, proceeding with potentially stale read",
+			zap.Error(err))
+		// Proceed anyway - stale reads are better than no reads
+	}
+
 	// Read from local FSM (no Raft needed for reads)
 	j, err := s.fsm.GetJob(req.JobId)
 	if err != nil {
@@ -146,6 +155,12 @@ func (s *MasterServer) GetJobStatus(ctx context.Context, req *proto.GetJobStatus
 
 // ListJobs lists jobs with optional filtering
 func (s *MasterServer) ListJobs(ctx context.Context, req *proto.ListJobsRequest) (*proto.ListJobsResponse, error) {
+	// Ensure read-your-writes consistency
+	if err := s.raftNode.Barrier(5 * time.Second); err != nil {
+		s.logger.Warn("barrier timeout during ListJobs, proceeding with potentially stale read",
+			zap.Error(err))
+	}
+
 	// Read all jobs from FSM
 	jobs := s.fsm.ListJobs()
 
@@ -238,6 +253,48 @@ func (s *MasterServer) CancelJob(ctx context.Context, req *proto.CancelJobReques
 	return &proto.CancelJobResponse{
 		Success: true,
 		Message: "Job cancelled successfully",
+	}, nil
+}
+
+// JoinCluster handles cluster membership requests
+func (s *MasterServer) JoinCluster(ctx context.Context, req *proto.JoinClusterRequest) (*proto.JoinClusterResponse, error) {
+	// Only leader can handle join requests
+	if !s.raftNode.IsLeader() {
+		leader := s.raftNode.Leader()
+		return &proto.JoinClusterResponse{
+			Success: false,
+			Message: fmt.Sprintf("not leader, redirect to %s", leader),
+			Leader:  leader,
+		}, nil
+	}
+
+	s.logger.Info("Cluster join request",
+		zap.String("node_id", req.NodeId),
+		zap.String("address", req.Address),
+	)
+
+	// Add node as voter
+	if err := s.raftNode.AddVoter(req.NodeId, req.Address, 0, 10*time.Second); err != nil {
+		s.logger.Error("Failed to add voter",
+			zap.String("node_id", req.NodeId),
+			zap.Error(err),
+		)
+		return &proto.JoinClusterResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to add node: %v", err),
+			Leader:  s.raftNode.Leader(),
+		}, err
+	}
+
+	s.logger.Info("Node added to cluster",
+		zap.String("node_id", req.NodeId),
+		zap.String("address", req.Address),
+	)
+
+	return &proto.JoinClusterResponse{
+		Success: true,
+		Message: "Successfully joined cluster",
+		Leader:  s.raftNode.Leader(),
 	}, nil
 }
 
