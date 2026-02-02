@@ -25,7 +25,7 @@ func TestExecutor_Execute_ImageProcessing(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	executor := NewExecutor("worker-1", logger)
 
-	j := job.New(job.TypeImageProcessing, []byte("test-image.jpg"), 5, 3)
+	j := job.New(job.TypeImageProcessing, []byte("test-image.jpg"), 5, 3, 0)
 	ctx := context.Background()
 
 	result := executor.Execute(ctx, j)
@@ -40,7 +40,7 @@ func TestExecutor_Execute_WebScraping(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	executor := NewExecutor("worker-1", logger)
 
-	j := job.New(job.TypeWebScraping, []byte("https://example.com"), 5, 3)
+	j := job.New(job.TypeWebScraping, []byte("https://example.com"), 5, 3, 0)
 	ctx := context.Background()
 
 	result := executor.Execute(ctx, j)
@@ -55,7 +55,7 @@ func TestExecutor_Execute_DataAnalysis(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	executor := NewExecutor("worker-1", logger)
 
-	j := job.New(job.TypeDataAnalysis, []byte("data.csv"), 5, 3)
+	j := job.New(job.TypeDataAnalysis, []byte("data.csv"), 5, 3, 0)
 	ctx := context.Background()
 
 	result := executor.Execute(ctx, j)

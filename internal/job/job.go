@@ -60,31 +60,33 @@ func ParseStatus(s string) (Status, error) {
 
 // Job represents a job to be executed
 type Job struct {
-	ID           string
-	Type         Type
-	Payload      []byte
-	Priority     int
-	Status       Status
-	AssignedTo   string
-	CreatedAt    time.Time
-	StartedAt    time.Time
-	CompletedAt  time.Time
-	Result       *Result
-	RetryCount   int
-	MaxRetries   int
-	ErrorMessage string
+	ID             string
+	Type           Type
+	Payload        []byte
+	Priority       int
+	Status         Status
+	AssignedTo     string
+	CreatedAt      time.Time
+	StartedAt      time.Time
+	CompletedAt    time.Time
+	Result         *Result
+	RetryCount     int
+	MaxRetries     int
+	ErrorMessage   string
+	TimeoutSeconds int64 // Job timeout in seconds (0 = no timeout)
 }
 
 // New creates a new job
-func New(jobType Type, payload []byte, priority int, maxRetries int) *Job {
+func New(jobType Type, payload []byte, priority int, maxRetries int, timeoutSeconds int64) *Job {
 	return &Job{
-		ID:         generateID(),
-		Type:       jobType,
-		Payload:    payload,
-		Priority:   priority,
-		Status:     StatusPending,
-		CreatedAt:  time.Now(),
-		MaxRetries: maxRetries,
+		ID:             generateID(),
+		Type:           jobType,
+		Payload:        payload,
+		Priority:       priority,
+		Status:         StatusPending,
+		CreatedAt:      time.Now(),
+		MaxRetries:     maxRetries,
+		TimeoutSeconds: timeoutSeconds,
 	}
 }
 
@@ -162,6 +164,46 @@ func (j *Job) Duration() time.Duration {
 		return j.CompletedAt.Sub(j.CreatedAt)
 	}
 	return j.CompletedAt.Sub(j.StartedAt)
+}
+
+// IsTimeout returns true if the job has exceeded its timeout duration
+func (j *Job) IsTimeout() bool {
+	if j.TimeoutSeconds == 0 {
+		return false // No timeout configured
+	}
+
+	if j.Status != StatusRunning {
+		return false // Only running jobs can timeout
+	}
+
+	if j.StartedAt.IsZero() {
+		return false // Job hasn't started yet
+	}
+
+	elapsed := time.Since(j.StartedAt)
+	timeout := time.Duration(j.TimeoutSeconds) * time.Second
+	return elapsed > timeout
+}
+
+// TimeoutDuration returns the timeout duration for this job
+func (j *Job) TimeoutDuration() time.Duration {
+	return time.Duration(j.TimeoutSeconds) * time.Second
+}
+
+// RemainingTimeout returns the remaining timeout duration (0 if no timeout or expired)
+func (j *Job) RemainingTimeout() time.Duration {
+	if j.TimeoutSeconds == 0 || j.Status != StatusRunning || j.StartedAt.IsZero() {
+		return 0
+	}
+
+	elapsed := time.Since(j.StartedAt)
+	timeout := time.Duration(j.TimeoutSeconds) * time.Second
+	remaining := timeout - elapsed
+
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // generateID generates a unique job ID

@@ -14,9 +14,9 @@ func TestJobQueue_PriorityOrdering(t *testing.T) {
 	queue := NewJobQueue()
 
 	// Create jobs with different priorities
-	lowPriorityJob := job.New(job.TypeImageProcessing, []byte("low"), 1, 3)
-	mediumPriorityJob := job.New(job.TypeWebScraping, []byte("medium"), 5, 3)
-	highPriorityJob := job.New(job.TypeDataAnalysis, []byte("high"), 10, 3)
+	lowPriorityJob := job.New(job.TypeImageProcessing, []byte("low"), 1, 3, 0)
+	mediumPriorityJob := job.New(job.TypeWebScraping, []byte("medium"), 5, 3, 0)
+	highPriorityJob := job.New(job.TypeDataAnalysis, []byte("high"), 10, 3, 0)
 
 	// Enqueue in random order
 	queue.Enqueue(mediumPriorityJob)
@@ -42,13 +42,13 @@ func TestJobQueue_SamePriority_FIFO(t *testing.T) {
 
 	// Create jobs with same priority but different creation times
 	time.Sleep(1 * time.Millisecond)
-	job1 := job.New(job.TypeImageProcessing, []byte("first"), 5, 3)
+	job1 := job.New(job.TypeImageProcessing, []byte("first"), 5, 3, 0)
 
 	time.Sleep(1 * time.Millisecond)
-	job2 := job.New(job.TypeImageProcessing, []byte("second"), 5, 3)
+	job2 := job.New(job.TypeImageProcessing, []byte("second"), 5, 3, 0)
 
 	time.Sleep(1 * time.Millisecond)
-	job3 := job.New(job.TypeImageProcessing, []byte("third"), 5, 3)
+	job3 := job.New(job.TypeImageProcessing, []byte("third"), 5, 3, 0)
 
 	// Enqueue in order
 	queue.Enqueue(job1)
@@ -70,7 +70,7 @@ func TestRoundRobinPolicy(t *testing.T) {
 		{ID: "worker-3", Status: "active", ActiveJobs: 0, MaxConcurrentJobs: 10},
 	}
 
-	j := job.New(job.TypeImageProcessing, []byte("test"), 5, 3)
+	j := job.New(job.TypeImageProcessing, []byte("test"), 5, 3, 0)
 
 	// Should cycle through workers
 	w1 := policy.SelectWorker(j, workers)
@@ -92,7 +92,7 @@ func TestLeastLoadedPolicy(t *testing.T) {
 		{ID: "worker-3", Status: "active", ActiveJobs: 8, MaxConcurrentJobs: 10},
 	}
 
-	j := job.New(job.TypeImageProcessing, []byte("test"), 5, 3)
+	j := job.New(job.TypeImageProcessing, []byte("test"), 5, 3, 0)
 
 	// Should select worker with fewest active jobs
 	selected := policy.SelectWorker(j, workers)
@@ -109,7 +109,7 @@ func TestPriorityPolicy_HighPriorityJob(t *testing.T) {
 	}
 
 	// High priority job should get least loaded worker
-	highPriorityJob := job.New(job.TypeImageProcessing, []byte("urgent"), 9, 3)
+	highPriorityJob := job.New(job.TypeImageProcessing, []byte("urgent"), 9, 3, 0)
 	selected := policy.SelectWorker(highPriorityJob, workers)
 	assert.Equal(t, "worker-2", selected.ID, "High priority job should get least loaded worker")
 }
@@ -123,7 +123,7 @@ func TestCapacityAwarePolicy(t *testing.T) {
 		{ID: "worker-3", Status: "active", ActiveJobs: 1, MaxConcurrentJobs: 5},  // 4 available
 	}
 
-	j := job.New(job.TypeImageProcessing, []byte("test"), 5, 3)
+	j := job.New(job.TypeImageProcessing, []byte("test"), 5, 3, 0)
 
 	// Should select worker with most available capacity
 	selected := policy.SelectWorker(j, workers)
@@ -139,7 +139,7 @@ func TestSchedulingPolicy_EmptyWorkers(t *testing.T) {
 		NewCapacityAwarePolicy(),
 	}
 
-	j := job.New(job.TypeImageProcessing, []byte("test"), 5, 3)
+	j := job.New(job.TypeImageProcessing, []byte("test"), 5, 3, 0)
 	emptyWorkers := []*worker.WorkerInfo{}
 
 	for _, policy := range policies {

@@ -75,15 +75,16 @@ func (w *WorkerServer) Heartbeat(ctx context.Context, req *proto.HeartbeatReques
 // protoToJob converts proto.Job to internal job.Job
 func protoToJob(pj *proto.Job) *job.Job {
 	j := &job.Job{
-		ID:           pj.Id,
-		Type:         parseJobTypeFromString(pj.Type),
-		Payload:      pj.Payload,
-		Priority:     int(pj.Priority),
-		Status:       parseStatusFromString(pj.Status),
-		AssignedTo:   pj.AssignedTo,
-		RetryCount:   int(pj.RetryCount),
-		MaxRetries:   int(pj.MaxRetries),
-		ErrorMessage: pj.ErrorMessage,
+		ID:             pj.Id,
+		Type:           parseJobTypeFromString(pj.Type),
+		Payload:        pj.Payload,
+		Priority:       int(pj.Priority),
+		Status:         parseStatusFromString(pj.Status),
+		AssignedTo:     pj.AssignedTo,
+		RetryCount:     int(pj.RetryCount),
+		MaxRetries:     int(pj.MaxRetries),
+		ErrorMessage:   pj.ErrorMessage,
+		TimeoutSeconds: pj.TimeoutSeconds,
 	}
 
 	if pj.CreatedAt != nil {

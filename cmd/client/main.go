@@ -16,6 +16,7 @@ func main() {
 	jobID := flag.String("job", "", "Job ID for status/cancel")
 	jobType := flag.String("type", "image_processing", "Job type")
 	payload := flag.String("payload", "test data", "Job payload")
+	timeoutSeconds := flag.Int64("timeout", 0, "Job timeout in seconds (0 = no timeout)")
 	flag.Parse()
 
 	// Create client
@@ -30,7 +31,15 @@ func main() {
 
 	switch *action {
 	case "submit":
-		jobID, err := c.SubmitJob(ctx, *jobType, []byte(*payload), 5, 3)
+		var jobID string
+		var err error
+
+		if *timeoutSeconds > 0 {
+			jobID, err = c.SubmitJobWithTimeout(ctx, *jobType, []byte(*payload), 5, 3, *timeoutSeconds)
+		} else {
+			jobID, err = c.SubmitJob(ctx, *jobType, []byte(*payload), 5, 3)
+		}
+
 		if err != nil {
 			log.Fatalf("SubmitJob failed: %v", err)
 		}
@@ -38,6 +47,9 @@ func main() {
 		fmt.Printf("Status: success\n")
 		fmt.Printf("Message: Job submitted successfully\n")
 		fmt.Printf("Job ID: %s\n", jobID)
+		if *timeoutSeconds > 0 {
+			fmt.Printf("Timeout: %d seconds\n", *timeoutSeconds)
+		}
 
 	case "status":
 		if *jobID == "" {

@@ -81,6 +81,7 @@ message Job {
   int32 retry_count = 11;
   int32 max_retries = 12;
   string error_message = 13;
+  int64 timeout_seconds = 14;  // Job timeout in seconds (0 = no timeout)
 }
 
 message JobResult {

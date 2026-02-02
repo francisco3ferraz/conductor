@@ -460,22 +460,23 @@ func (x *CancelJobResponse) GetMessage() string {
 
 // Job model
 type Job struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	Payload       []byte                 `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
-	Priority      int32                  `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
-	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`                           // "pending", "assigned", "running", "completed", "failed", "cancelled"
-	AssignedTo    string                 `protobuf:"bytes,6,opt,name=assigned_to,json=assignedTo,proto3" json:"assigned_to,omitempty"` // Worker ID
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	CompletedAt   *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
-	Result        *JobResult             `protobuf:"bytes,10,opt,name=result,proto3" json:"result,omitempty"`
-	RetryCount    int32                  `protobuf:"varint,11,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
-	MaxRetries    int32                  `protobuf:"varint,12,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
-	ErrorMessage  string                 `protobuf:"bytes,13,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Type           string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Payload        []byte                 `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
+	Priority       int32                  `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
+	Status         string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`                           // "pending", "assigned", "running", "completed", "failed", "cancelled"
+	AssignedTo     string                 `protobuf:"bytes,6,opt,name=assigned_to,json=assignedTo,proto3" json:"assigned_to,omitempty"` // Worker ID
+	CreatedAt      *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	StartedAt      *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	CompletedAt    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	Result         *JobResult             `protobuf:"bytes,10,opt,name=result,proto3" json:"result,omitempty"`
+	RetryCount     int32                  `protobuf:"varint,11,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
+	MaxRetries     int32                  `protobuf:"varint,12,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	ErrorMessage   string                 `protobuf:"bytes,13,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	TimeoutSeconds int64                  `protobuf:"varint,14,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // Job timeout in seconds (0 = no timeout)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Job) Reset() {
@@ -597,6 +598,13 @@ func (x *Job) GetErrorMessage() string {
 		return x.ErrorMessage
 	}
 	return ""
+}
+
+func (x *Job) GetTimeoutSeconds() int64 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
 }
 
 type JobResult struct {
@@ -1226,7 +1234,7 @@ const file_api_proto_scheduler_proto_rawDesc = "" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"G\n" +
 	"\x11CancelJobResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xde\x03\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x87\x04\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
@@ -1246,7 +1254,8 @@ const file_api_proto_scheduler_proto_rawDesc = "" +
 	"retryCount\x12\x1f\n" +
 	"\vmax_retries\x18\f \x01(\x05R\n" +
 	"maxRetries\x12#\n" +
-	"\rerror_message\x18\r \x01(\tR\ferrorMessage\"t\n" +
+	"\rerror_message\x18\r \x01(\tR\ferrorMessage\x12'\n" +
+	"\x0ftimeout_seconds\x18\x0e \x01(\x03R\x0etimeoutSeconds\"t\n" +
 	"\tJobResult\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
 	"\x06output\x18\x02 \x01(\fR\x06output\x12\x14\n" +

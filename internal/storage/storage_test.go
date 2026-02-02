@@ -14,7 +14,7 @@ func TestMemoryStore_Jobs(t *testing.T) {
 	defer store.Close()
 
 	// Create a job
-	j := job.New(job.TypeImageProcessing, []byte("payload"), 5, 3)
+	j := job.New(job.TypeImageProcessing, []byte("payload"), 5, 3, 0)
 
 	// Save job
 	err := store.SaveJob(j)
@@ -49,14 +49,14 @@ func TestMemoryStore_JobFiltering(t *testing.T) {
 	defer store.Close()
 
 	// Create jobs with different statuses
-	j1 := job.New(job.TypeImageProcessing, []byte("1"), 5, 3)
+	j1 := job.New(job.TypeImageProcessing, []byte("1"), 5, 3, 0)
 	j1.Status = job.StatusPending
 
-	j2 := job.New(job.TypeWebScraping, []byte("2"), 3, 3)
+	j2 := job.New(job.TypeWebScraping, []byte("2"), 3, 3, 0)
 	j2.Assign("worker-1")
 	j2.Status = job.StatusAssigned
 
-	j3 := job.New(job.TypeDataAnalysis, []byte("3"), 1, 3)
+	j3 := job.New(job.TypeDataAnalysis, []byte("3"), 1, 3, 0)
 	j3.Status = job.StatusPending
 
 	store.SaveJob(j1)
@@ -127,7 +127,7 @@ func TestMemoryStore_Concurrent(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			j := job.New(job.TypeImageProcessing, []byte("payload"), 1, 3)
+			j := job.New(job.TypeImageProcessing, []byte("payload"), 1, 3, 0)
 			store.SaveJob(j)
 			done <- true
 		}(i)

@@ -75,7 +75,7 @@ func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobReques
 	jobType := parseJobType(req.Type)
 
 	// Create job
-	j := job.New(jobType, req.Payload, int(req.Priority), int(req.MaxRetries))
+	j := job.New(jobType, req.Payload, int(req.Priority), int(req.MaxRetries), req.GetTimeoutSeconds())
 
 	s.logger.Info("Submitting job via gRPC",
 		zap.String("job_id", j.ID),
@@ -118,16 +118,17 @@ func (s *MasterServer) GetJobStatus(ctx context.Context, req *proto.GetJobStatus
 
 	// Convert to proto Job
 	pbJob := &proto.Job{
-		Id:           j.ID,
-		Type:         j.Type.String(),
-		Payload:      j.Payload,
-		Priority:     int32(j.Priority),
-		Status:       j.Status.String(),
-		AssignedTo:   j.AssignedTo,
-		CreatedAt:    timestamppb.New(j.CreatedAt),
-		RetryCount:   int32(j.RetryCount),
-		MaxRetries:   int32(j.MaxRetries),
-		ErrorMessage: j.ErrorMessage,
+		Id:             j.ID,
+		Type:           j.Type.String(),
+		Payload:        j.Payload,
+		Priority:       int32(j.Priority),
+		Status:         j.Status.String(),
+		AssignedTo:     j.AssignedTo,
+		CreatedAt:      timestamppb.New(j.CreatedAt),
+		RetryCount:     int32(j.RetryCount),
+		MaxRetries:     int32(j.MaxRetries),
+		ErrorMessage:   j.ErrorMessage,
+		TimeoutSeconds: j.TimeoutSeconds,
 	}
 
 	// Add timestamps if set

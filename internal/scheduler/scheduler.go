@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -88,6 +89,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 			// Only schedule if we're the leader
 			if s.raftNode.IsLeader() {
 				s.schedulePendingJobs()
+				s.checkJobTimeouts()
 			}
 		}
 	}
@@ -109,6 +111,31 @@ func (s *Scheduler) Stop() {
 
 	close(s.stopCh)
 	s.logger.Info("Scheduler stopped")
+}
+
+// checkJobTimeouts checks for timed out jobs and fails them
+func (s *Scheduler) checkJobTimeouts() {
+	jobs := s.fsm.ListJobs()
+
+	for _, j := range jobs {
+		if j.IsTimeout() {
+			s.logger.Warn("Job timed out",
+				zap.String("job_id", j.ID),
+				zap.String("worker_id", j.AssignedTo),
+				zap.Duration("timeout", j.TimeoutDuration()),
+				zap.Duration("elapsed", time.Since(j.StartedAt)),
+			)
+
+			// Fail the job due to timeout
+			timeoutErr := fmt.Sprintf("job timed out after %v", j.TimeoutDuration())
+			if err := s.applier.FailJob(j.ID, timeoutErr); err != nil {
+				s.logger.Error("Failed to timeout job",
+					zap.String("job_id", j.ID),
+					zap.Error(err),
+				)
+			}
+		}
+	}
 }
 
 // schedulePendingJobs finds pending jobs and assigns them to workers
