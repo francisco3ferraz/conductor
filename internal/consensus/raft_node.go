@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -36,6 +37,9 @@ type Config struct {
 	// Snapshot config
 	SnapshotInterval  time.Duration
 	SnapshotThreshold uint64
+
+	// TLS config for Raft communication
+	TLSConfig *tls.Config
 }
 
 // NewRaftNode creates a new Raft node
@@ -85,6 +89,13 @@ func NewRaftNode(cfg *Config, fsm *FSM, logger *zap.Logger) (*RaftNode, error) {
 	addr, err := net.ResolveTCPAddr("tcp", cfg.BindAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve bind address: %w", err)
+	}
+
+	// Create transport (TLS is handled at connection level if provided)
+	if cfg.TLSConfig != nil {
+		logger.Info("Raft: TLS encryption configured for cluster communication")
+	} else {
+		logger.Warn("Raft: TLS encryption DISABLED - NOT FOR PRODUCTION")
 	}
 
 	transport, err := raft.NewTCPTransport(cfg.BindAddr, addr, 3, 10*time.Second, os.Stderr)

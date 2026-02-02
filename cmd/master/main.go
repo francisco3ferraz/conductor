@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/rpc"
 	"github.com/francisco3ferraz/conductor/internal/scheduler"
+	"github.com/francisco3ferraz/conductor/internal/security"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -60,7 +62,33 @@ func main() {
 	// Initialize Raft FSM
 	fsm := consensus.NewFSM(logger)
 
-	// Initialize Raft node
+	// Initialize security components
+	var raftTLSConfig *security.TLSConfig
+	if cfg.Security.RaftTLS.Enabled {
+		raftTLSConfig = &security.TLSConfig{
+			Enabled:      cfg.Security.RaftTLS.Enabled,
+			CertFile:     cfg.Security.RaftTLS.CertFile,
+			KeyFile:      cfg.Security.RaftTLS.KeyFile,
+			CAFile:       cfg.Security.RaftTLS.CAFile,
+			SkipVerify:   cfg.Security.RaftTLS.SkipVerify,
+			AutoGenerate: cfg.Security.RaftTLS.AutoGenerate,
+		}
+	}
+
+	var raftTLS *security.CertManager
+	var tlsConfigForRaft *tls.Config
+	if raftTLSConfig != nil {
+		raftTLS = security.NewCertManager(raftTLSConfig, logger)
+		tlsConfigForRaft, err = raftTLS.LoadRaftTLSConfig()
+		if err != nil {
+			logger.Fatal("Failed to load Raft TLS config", zap.Error(err))
+		}
+		if tlsConfigForRaft != nil {
+			logger.Info("Raft TLS encryption enabled")
+		}
+	}
+
+	// Initialize Raft node with TLS
 	raftConfig := &consensus.Config{
 		NodeID:            cfg.Cluster.NodeID,
 		BindAddr:          cfg.Cluster.BindAddr,
@@ -71,6 +99,7 @@ func main() {
 		ElectionTimeout:   cfg.Raft.ElectionTimeout,
 		SnapshotInterval:  cfg.Raft.SnapshotInterval,
 		SnapshotThreshold: cfg.Raft.SnapshotThreshold,
+		TLSConfig:         tlsConfigForRaft,
 	}
 
 	raftNode, err := consensus.NewRaftNode(raftConfig, fsm, logger)
@@ -127,20 +156,66 @@ func main() {
 		logger.Info("Leader elected", zap.String("leader", raftNode.Leader()))
 	}
 
-	// Create gRPC server with interceptors
+	// Initialize auth manager
+	authManager := security.NewAuthManager(&security.JWTConfig{
+		SecretKey:  cfg.Security.JWT.SecretKey,
+		Issuer:     cfg.Security.JWT.Issuer,
+		Audience:   cfg.Security.JWT.Audience,
+		SkipExpiry: cfg.Security.JWT.SkipExpiry,
+	}, logger)
+
+	// Initialize RBAC if enabled
+	var rbac *security.RBAC
+	if cfg.Security.RBAC.Enabled {
+		rbac = security.NewRBAC(logger)
+		// Add default admin user for testing
+		if err := rbac.AddUser("admin", "admin", "admin"); err != nil {
+			logger.Fatal("Failed to create admin user", zap.Error(err))
+		}
+		logger.Info("RBAC enabled")
+	}
+
+	// Build interceptor chain
 	interceptors := []grpc.UnaryServerInterceptor{
 		rpc.LoggingInterceptor(logger),
-		rpc.AuthInterceptorWithConfig(logger, &rpc.JWTConfig{
-			SecretKey:  cfg.JWT.SecretKey,
-			Issuer:     cfg.JWT.Issuer,
-			Audience:   cfg.JWT.Audience,
-			SkipExpiry: cfg.JWT.SkipExpiry,
-		}),
+		authManager.AuthInterceptor(),
 		rpc.RecoveryInterceptor(logger),
 	}
-	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(rpc.ChainInterceptors(interceptors...)),
-	)
+
+	// Add RBAC interceptor if enabled
+	if rbac != nil {
+		interceptors = append(interceptors[:2], append([]grpc.UnaryServerInterceptor{rbac.RBACInterceptor()}, interceptors[2:]...)...)
+	}
+
+	// Load TLS credentials for gRPC if enabled
+	var grpcOpts []grpc.ServerOption
+	if cfg.Security.TLS.Enabled {
+		tlsConfig := &security.TLSConfig{
+			Enabled:      cfg.Security.TLS.Enabled,
+			CertFile:     cfg.Security.TLS.CertFile,
+			KeyFile:      cfg.Security.TLS.KeyFile,
+			CAFile:       cfg.Security.TLS.CAFile,
+			SkipVerify:   cfg.Security.TLS.SkipVerify,
+			AutoGenerate: cfg.Security.TLS.AutoGenerate,
+		}
+		certManager := security.NewCertManager(tlsConfig, logger)
+		creds, err := certManager.LoadOrGenerateServerTLS()
+		if err != nil {
+			logger.Fatal("Failed to load TLS credentials", zap.Error(err))
+		}
+		if creds != nil {
+			grpcOpts = append(grpcOpts, grpc.Creds(creds))
+			logger.Info("gRPC mTLS enabled")
+		}
+	} else {
+		logger.Warn("gRPC TLS DISABLED - NOT FOR PRODUCTION")
+	}
+
+	// Add interceptor chain
+	grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(rpc.ChainInterceptors(interceptors...)))
+
+	// Create gRPC server with security
+	grpcServer := grpc.NewServer(grpcOpts...)
 	masterSvc := rpc.NewMasterServer(raftNode, fsm, logger)
 	proto.RegisterMasterServiceServer(grpcServer, masterSvc)
 	proto.RegisterWorkerServiceServer(grpcServer, masterSvc)

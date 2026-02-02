@@ -15,7 +15,7 @@ type Config struct {
 	Worker    WorkerConfig    `mapstructure:"worker"`
 	Scheduler SchedulerConfig `mapstructure:"scheduler"`
 	Log       LogConfig       `mapstructure:"log"`
-	JWT       JWTConfig       `mapstructure:"jwt"`
+	Security  SecurityConfig  `mapstructure:"security"`
 }
 
 type ClusterConfig struct {
@@ -56,6 +56,35 @@ type SchedulerConfig struct {
 
 type LogConfig struct {
 	Level string `mapstructure:"level"`
+}
+
+// SecurityConfig holds all security-related configuration
+type SecurityConfig struct {
+	// TLS configuration for gRPC
+	TLS TLSConfig `mapstructure:"tls"`
+
+	// JWT configuration for authentication
+	JWT JWTConfig `mapstructure:"jwt"`
+
+	// RBAC configuration
+	RBAC RBACConfig `mapstructure:"rbac"`
+
+	// Raft TLS configuration
+	RaftTLS TLSConfig `mapstructure:"raft_tls"`
+}
+
+type TLSConfig struct {
+	Enabled      bool   `mapstructure:"enabled"`
+	CertFile     string `mapstructure:"cert_file"`
+	KeyFile      string `mapstructure:"key_file"`
+	CAFile       string `mapstructure:"ca_file"`
+	ServerName   string `mapstructure:"server_name"`
+	SkipVerify   bool   `mapstructure:"skip_verify"`   // Only for development
+	AutoGenerate bool   `mapstructure:"auto_generate"` // Auto-generate self-signed certs
+}
+
+type RBACConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 type JWTConfig struct {
@@ -145,11 +174,32 @@ func setDefaults(v *viper.Viper) {
 	// Log defaults
 	v.SetDefault("log.level", "info")
 
+	// Security defaults
+	// TLS for gRPC
+	v.SetDefault("security.tls.enabled", false) // Disabled by default for development
+	v.SetDefault("security.tls.cert_file", "/tmp/conductor/certs/server.crt")
+	v.SetDefault("security.tls.key_file", "/tmp/conductor/certs/server.key")
+	v.SetDefault("security.tls.ca_file", "/tmp/conductor/certs/ca.crt")
+	v.SetDefault("security.tls.server_name", "localhost")
+	v.SetDefault("security.tls.skip_verify", true) // Development mode
+	v.SetDefault("security.tls.auto_generate", true)
+
 	// JWT defaults
-	v.SetDefault("jwt.secret_key", "dev-secret-key-conductor-2026-change-in-production")
-	v.SetDefault("jwt.issuer", "conductor-system")
-	v.SetDefault("jwt.audience", "conductor-api")
-	v.SetDefault("jwt.skip_expiry", true) // Development mode
+	v.SetDefault("security.jwt.secret_key", "dev-secret-key-conductor-2026-change-in-production")
+	v.SetDefault("security.jwt.issuer", "conductor-system")
+	v.SetDefault("security.jwt.audience", "conductor-api")
+	v.SetDefault("security.jwt.skip_expiry", true) // Development mode
+
+	// RBAC defaults
+	v.SetDefault("security.rbac.enabled", false) // Disabled by default for development
+
+	// Raft TLS defaults
+	v.SetDefault("security.raft_tls.enabled", false) // Disabled by default
+	v.SetDefault("security.raft_tls.cert_file", "/tmp/conductor/certs/raft.crt")
+	v.SetDefault("security.raft_tls.key_file", "/tmp/conductor/certs/raft.key")
+	v.SetDefault("security.raft_tls.ca_file", "/tmp/conductor/certs/ca.crt")
+	v.SetDefault("security.raft_tls.skip_verify", true)
+	v.SetDefault("security.raft_tls.auto_generate", true)
 }
 
 // Validate validates the configuration
