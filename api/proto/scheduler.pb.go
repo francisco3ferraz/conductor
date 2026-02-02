@@ -667,6 +667,119 @@ func (x *JobResult) GetDurationMs() int64 {
 	return 0
 }
 
+// Cluster membership
+type JoinClusterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Address       string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"` // Raft bind address of joining node
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JoinClusterRequest) Reset() {
+	*x = JoinClusterRequest{}
+	mi := &file_api_proto_scheduler_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinClusterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinClusterRequest) ProtoMessage() {}
+
+func (x *JoinClusterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_scheduler_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinClusterRequest.ProtoReflect.Descriptor instead.
+func (*JoinClusterRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_scheduler_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *JoinClusterRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *JoinClusterRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type JoinClusterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Leader        string                 `protobuf:"bytes,3,opt,name=leader,proto3" json:"leader,omitempty"` // Current leader address
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JoinClusterResponse) Reset() {
+	*x = JoinClusterResponse{}
+	mi := &file_api_proto_scheduler_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinClusterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinClusterResponse) ProtoMessage() {}
+
+func (x *JoinClusterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_scheduler_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinClusterResponse.ProtoReflect.Descriptor instead.
+func (*JoinClusterResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_scheduler_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *JoinClusterResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *JoinClusterResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *JoinClusterResponse) GetLeader() string {
+	if x != nil {
+		return x.Leader
+	}
+	return ""
+}
+
 var File_api_proto_scheduler_proto protoreflect.FileDescriptor
 
 const file_api_proto_scheduler_proto_rawDesc = "" +
@@ -726,12 +839,20 @@ const file_api_proto_scheduler_proto_rawDesc = "" +
 	"\x06output\x18\x02 \x01(\fR\x06output\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
 	"\vduration_ms\x18\x04 \x01(\x03R\n" +
-	"durationMs2\x95\x02\n" +
+	"durationMs\"G\n" +
+	"\x12JoinClusterRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddress\"a\n" +
+	"\x13JoinClusterResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
+	"\x06leader\x18\x03 \x01(\tR\x06leader2\xdb\x02\n" +
 	"\rMasterService\x12>\n" +
 	"\tSubmitJob\x12\x17.proto.SubmitJobRequest\x1a\x18.proto.SubmitJobResponse\x12G\n" +
 	"\fGetJobStatus\x12\x1a.proto.GetJobStatusRequest\x1a\x1b.proto.GetJobStatusResponse\x12;\n" +
 	"\bListJobs\x12\x16.proto.ListJobsRequest\x1a\x17.proto.ListJobsResponse\x12>\n" +
-	"\tCancelJob\x12\x17.proto.CancelJobRequest\x1a\x18.proto.CancelJobResponseB1Z/github.com/francisco3ferraz/conductor/api/protob\x06proto3"
+	"\tCancelJob\x12\x17.proto.CancelJobRequest\x1a\x18.proto.CancelJobResponse\x12D\n" +
+	"\vJoinCluster\x12\x19.proto.JoinClusterRequest\x1a\x1a.proto.JoinClusterResponseB1Z/github.com/francisco3ferraz/conductor/api/protob\x06proto3"
 
 var (
 	file_api_proto_scheduler_proto_rawDescOnce sync.Once
@@ -745,7 +866,7 @@ func file_api_proto_scheduler_proto_rawDescGZIP() []byte {
 	return file_api_proto_scheduler_proto_rawDescData
 }
 
-var file_api_proto_scheduler_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_api_proto_scheduler_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_api_proto_scheduler_proto_goTypes = []any{
 	(*SubmitJobRequest)(nil),      // 0: proto.SubmitJobRequest
 	(*SubmitJobResponse)(nil),     // 1: proto.SubmitJobResponse
@@ -757,25 +878,29 @@ var file_api_proto_scheduler_proto_goTypes = []any{
 	(*CancelJobResponse)(nil),     // 7: proto.CancelJobResponse
 	(*Job)(nil),                   // 8: proto.Job
 	(*JobResult)(nil),             // 9: proto.JobResult
-	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(*JoinClusterRequest)(nil),    // 10: proto.JoinClusterRequest
+	(*JoinClusterResponse)(nil),   // 11: proto.JoinClusterResponse
+	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
 var file_api_proto_scheduler_proto_depIdxs = []int32{
 	8,  // 0: proto.GetJobStatusResponse.job:type_name -> proto.Job
 	8,  // 1: proto.ListJobsResponse.jobs:type_name -> proto.Job
-	10, // 2: proto.Job.created_at:type_name -> google.protobuf.Timestamp
-	10, // 3: proto.Job.started_at:type_name -> google.protobuf.Timestamp
-	10, // 4: proto.Job.completed_at:type_name -> google.protobuf.Timestamp
+	12, // 2: proto.Job.created_at:type_name -> google.protobuf.Timestamp
+	12, // 3: proto.Job.started_at:type_name -> google.protobuf.Timestamp
+	12, // 4: proto.Job.completed_at:type_name -> google.protobuf.Timestamp
 	9,  // 5: proto.Job.result:type_name -> proto.JobResult
 	0,  // 6: proto.MasterService.SubmitJob:input_type -> proto.SubmitJobRequest
 	2,  // 7: proto.MasterService.GetJobStatus:input_type -> proto.GetJobStatusRequest
 	4,  // 8: proto.MasterService.ListJobs:input_type -> proto.ListJobsRequest
 	6,  // 9: proto.MasterService.CancelJob:input_type -> proto.CancelJobRequest
-	1,  // 10: proto.MasterService.SubmitJob:output_type -> proto.SubmitJobResponse
-	3,  // 11: proto.MasterService.GetJobStatus:output_type -> proto.GetJobStatusResponse
-	5,  // 12: proto.MasterService.ListJobs:output_type -> proto.ListJobsResponse
-	7,  // 13: proto.MasterService.CancelJob:output_type -> proto.CancelJobResponse
-	10, // [10:14] is the sub-list for method output_type
-	6,  // [6:10] is the sub-list for method input_type
+	10, // 10: proto.MasterService.JoinCluster:input_type -> proto.JoinClusterRequest
+	1,  // 11: proto.MasterService.SubmitJob:output_type -> proto.SubmitJobResponse
+	3,  // 12: proto.MasterService.GetJobStatus:output_type -> proto.GetJobStatusResponse
+	5,  // 13: proto.MasterService.ListJobs:output_type -> proto.ListJobsResponse
+	7,  // 14: proto.MasterService.CancelJob:output_type -> proto.CancelJobResponse
+	11, // 15: proto.MasterService.JoinCluster:output_type -> proto.JoinClusterResponse
+	11, // [11:16] is the sub-list for method output_type
+	6,  // [6:11] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -792,7 +917,7 @@ func file_api_proto_scheduler_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_scheduler_proto_rawDesc), len(file_api_proto_scheduler_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

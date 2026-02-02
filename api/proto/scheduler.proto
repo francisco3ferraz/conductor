@@ -12,6 +12,7 @@ service MasterService {
   rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  rpc JoinCluster(JoinClusterRequest) returns (JoinClusterResponse);
 }
 
 // Job submission request
@@ -82,4 +83,16 @@ message JobResult {
   bytes output = 2;
   string error = 3;
   int64 duration_ms = 4;
+}
+
+// Cluster membership
+message JoinClusterRequest {
+  string node_id = 1;
+  string address = 2;  // Raft bind address of joining node
+}
+
+message JoinClusterResponse {
+  bool success = 1;
+  string message = 2;
+  string leader = 3;   // Current leader address
 }
