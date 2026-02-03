@@ -4,6 +4,7 @@ import (
 	"context"
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
+	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.uber.org/zap"
@@ -16,15 +17,17 @@ type WorkerServer struct {
 	executor       *worker.Executor
 	resultReporter func(context.Context, string, *job.Result) error
 	logger         *zap.Logger
+	cfg            *config.Config
 }
 
 // NewWorkerServer creates a new worker gRPC server
-func NewWorkerServer(workerID string, exec *worker.Executor, resultReporter func(context.Context, string, *job.Result) error, logger *zap.Logger) *WorkerServer {
+func NewWorkerServer(workerID string, exec *worker.Executor, resultReporter func(context.Context, string, *job.Result) error, cfg *config.Config, logger *zap.Logger) *WorkerServer {
 	return &WorkerServer{
 		workerID:       workerID,
 		executor:       exec,
 		resultReporter: resultReporter,
 		logger:         logger,
+		cfg:            cfg,
 	}
 }
 
@@ -38,24 +41,26 @@ func (w *WorkerServer) AssignJob(ctx context.Context, req *proto.AssignJobReques
 	// Convert proto.Job to job.Job
 	j := protoToJob(req.Job)
 
-	// Execute job in goroutine
-	go func() {
+	// Execute job in goroutine with context propagation
+	go func(jobCtx context.Context) {
 		// Mark job as running (start it)
 		j.Start()
 
-		// Execute the job
-		result := w.executor.Execute(context.Background(), j)
+		// Execute the job with parent context
+		result := w.executor.Execute(jobCtx, j)
 
-		// Report result back to master
+		// Report result back to master with timeout
 		if w.resultReporter != nil {
-			if err := w.resultReporter(context.Background(), j.ID, result); err != nil {
+			reportCtx, cancel := context.WithTimeout(context.Background(), w.cfg.Worker.ResultTimeout)
+			defer cancel()
+			if err := w.resultReporter(reportCtx, j.ID, result); err != nil {
 				w.logger.Error("Failed to report job result",
 					zap.String("job_id", j.ID),
 					zap.Error(err),
 				)
 			}
 		}
-	}()
+	}(ctx)
 
 	return &proto.AssignJobResponse{
 		Accepted: true,

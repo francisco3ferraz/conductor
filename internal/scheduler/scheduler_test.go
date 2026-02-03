@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/worker"
@@ -12,11 +13,32 @@ import (
 	"go.uber.org/zap"
 )
 
+// Helper function to create test config
+func testConfig() *config.Config {
+	return &config.Config{
+		Scheduler: config.SchedulerConfig{
+			AssignmentTimeout: 5 * time.Second,
+		},
+		Worker: config.WorkerConfig{
+			HeartbeatTimeout: 10 * time.Second,
+			ResultTimeout:    10 * time.Second,
+		},
+		Raft: config.RaftConfig{
+			BarrierTimeout: 5 * time.Second,
+		},
+		GRPC: config.GRPCConfig{
+			DialTimeout:    2 * time.Second,
+			ConnectionWait: 2 * time.Second,
+		},
+	}
+}
+
 func TestScheduler_NewScheduler(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
+	cfg := testConfig()
 
-	scheduler := NewScheduler(nil, fsm, logger)
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	assert.NotNil(t, scheduler)
 	assert.NotNil(t, scheduler.registry)
@@ -28,7 +50,8 @@ func TestScheduler_NewScheduler(t *testing.T) {
 func TestScheduler_RegisterWorker(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Register directly in registry (RegisterWorker method requires Raft)
 	scheduler.registry.Register("worker-test", "localhost:9999", 5)
@@ -45,7 +68,8 @@ func TestScheduler_RegisterWorker(t *testing.T) {
 func TestScheduler_ListWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Register multiple workers directly in registry
 	scheduler.registry.Register("worker-1", "localhost:9001", 10)
@@ -69,7 +93,8 @@ func TestScheduler_ListWorkers(t *testing.T) {
 func TestScheduler_UpdateHeartbeat(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Register worker directly
 	scheduler.registry.Register("worker-1", "localhost:9001", 10)
@@ -94,7 +119,8 @@ func TestScheduler_UpdateHeartbeat(t *testing.T) {
 func TestScheduler_RemoveWorker(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Register and then remove (use registry directly to avoid Raft calls)
 	scheduler.registry.Register("worker-remove", "localhost:9999", 5)
@@ -109,7 +135,8 @@ func TestScheduler_RemoveWorker(t *testing.T) {
 func TestScheduler_CheckWorkerHealth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Register workers directly
 	scheduler.registry.Register("worker-1", "localhost:9001", 10)
@@ -138,7 +165,8 @@ func TestScheduler_CheckWorkerHealth(t *testing.T) {
 func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Set to LeastLoaded policy for predictable testing
 	scheduler.SetSchedulingPolicy(NewLeastLoadedPolicy())
@@ -160,7 +188,8 @@ func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 	// Get available workers
 	allWorkers := scheduler.registry.List()
 	availableWorkers := make([]*worker.WorkerInfo, 0)
-	for _, w := range allWorkers {
+	for i := range allWorkers {
+		w := &allWorkers[i] // Take address of copy
 		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
 			availableWorkers = append(availableWorkers, w)
 		}
@@ -181,7 +210,8 @@ func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 	// No available workers
 	allWorkers = scheduler.registry.List()
 	availableWorkers = make([]*worker.WorkerInfo, 0)
-	for _, w := range allWorkers {
+	for i := range allWorkers {
+		w := &allWorkers[i] // Take address of copy
 		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
 			availableWorkers = append(availableWorkers, w)
 		}
@@ -192,7 +222,8 @@ func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 func TestScheduler_SchedulePendingJobs_NoWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Schedule without workers - should not crash
 	scheduler.schedulePendingJobs()
@@ -203,7 +234,8 @@ func TestScheduler_SchedulePendingJobs_NoWorkers(t *testing.T) {
 func TestScheduler_Stop(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Stop should not panic
 	scheduler.Stop()
@@ -212,7 +244,8 @@ func TestScheduler_Stop(t *testing.T) {
 func TestScheduler_PolicyIgnoresInactiveWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	fsm := consensus.NewFSM(logger)
-	scheduler := NewScheduler(nil, fsm, logger)
+	cfg := testConfig()
+	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Register workers
 	scheduler.registry.Register("worker-active", "localhost:9001", 10)
@@ -226,7 +259,8 @@ func TestScheduler_PolicyIgnoresInactiveWorkers(t *testing.T) {
 	// Get available workers (should only include active ones)
 	allWorkers := scheduler.registry.List()
 	availableWorkers := make([]*worker.WorkerInfo, 0)
-	for _, w := range allWorkers {
+	for i := range allWorkers {
+		w := &allWorkers[i] // Take address of copy
 		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
 			availableWorkers = append(availableWorkers, w)
 		}

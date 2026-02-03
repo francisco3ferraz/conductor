@@ -42,7 +42,7 @@ func main() {
 	tracingConfig := tracing.DefaultConfig()
 	tracingConfig.ServiceName = "conductor-worker"
 	tracingConfig.ServiceVersion = "1.0.0"
-	
+
 	ctx := context.Background()
 	tracingShutdown, err := tracing.Initialize(ctx, tracingConfig)
 	if err != nil {
@@ -148,7 +148,7 @@ func main() {
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(rpc.ChainInterceptors(interceptors...)),
 	)
-	workerSvc := rpc.NewWorkerServer(cfg.Worker.WorkerID, exec, resultReporter, logger)
+	workerSvc := rpc.NewWorkerServer(cfg.Worker.WorkerID, exec, resultReporter, cfg, logger)
 	proto.RegisterWorkerServiceServer(grpcServer, workerSvc)
 
 	workerAddr := fmt.Sprintf(":%d", cfg.GRPC.WorkerPort)

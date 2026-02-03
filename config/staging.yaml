@@ -12,6 +12,7 @@ cluster:
 raft:
   heartbeat_timeout: 1s
   election_timeout: 3s
+  barrier_timeout: 7s
   snapshot_interval: 120s
   snapshot_threshold: 8192
 
@@ -19,17 +20,21 @@ grpc:
   master_port: 9000
   worker_port: 9001
   max_msg_size: 4194304
+  dial_timeout: 3s
+  connection_wait: 3s
 
 worker:
   worker_id: staging-worker-1
   master_addr: staging-master.conductor.svc:9000
   heartbeat_interval: 3s
   heartbeat_timeout: 10s
+  result_timeout: 15s
   max_concurrent_jobs: 20
 
 scheduler:
   scheduling_policy: capacity-aware
   job_timeout: 5m
+  assignment_timeout: 7s
   max_retries: 3
   retry_delay: 30s
   rebalance_interval: 2m

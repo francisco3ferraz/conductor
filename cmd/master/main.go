@@ -252,7 +252,7 @@ func main() {
 	proto.RegisterWorkerServiceServer(grpcServer, masterSvc)
 
 	// Create and start scheduler
-	sched := scheduler.NewScheduler(raftNode, fsm, logger)
+	sched := scheduler.NewScheduler(raftNode, fsm, cfg, logger)
 
 	// Configure scheduling policy based on config
 	policy := getSchedulingPolicy(cfg.Scheduler.SchedulingPolicy, logger)

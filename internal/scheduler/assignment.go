@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/job"
@@ -38,8 +37,9 @@ func (s *Scheduler) sendJobToWorker(j *job.Job, w *worker.WorkerInfo) error {
 		ErrorMessage: j.ErrorMessage,
 	}
 
-	// Send job to worker
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Send job to worker with timeout
+	// TODO: Accept parent context as parameter to enable cancellation
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Scheduler.AssignmentTimeout)
 	defer cancel()
 
 	resp, err := client.AssignJob(ctx, &proto.AssignJobRequest{

@@ -51,7 +51,9 @@ type RecoveryStats struct {
 }
 
 // NewRecoveryManager creates a new recovery manager
+// Accepts parent context for proper shutdown propagation
 func NewRecoveryManager(
+	ctx context.Context,
 	scheduler SchedulerInterface,
 	jobStore storage.Store,
 	fsm JobStateMachine,
@@ -59,7 +61,7 @@ func NewRecoveryManager(
 	retryDelay time.Duration,
 	logger *zap.Logger,
 ) *RecoveryManager {
-	ctx, cancel := context.WithCancel(context.Background())
+	childCtx, cancel := context.WithCancel(ctx)
 
 	return &RecoveryManager{
 		scheduler:     scheduler,
@@ -69,7 +71,7 @@ func NewRecoveryManager(
 		recoveryQueue: make(chan string, 100), // Buffer for worker failures
 		maxRetries:    maxRetries,
 		retryDelay:    retryDelay,
-		ctx:           ctx,
+		ctx:           childCtx,
 		cancel:        cancel,
 	}
 }

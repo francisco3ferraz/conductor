@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/failover"
 	"github.com/francisco3ferraz/conductor/internal/job"
@@ -20,6 +21,7 @@ type Scheduler struct {
 	fsm      *consensus.FSM
 	applier  *consensus.ApplyCommand
 	logger   *zap.Logger
+	cfg      *config.Config
 
 	registry *worker.Registry
 	policy   SchedulingPolicy
@@ -33,12 +35,13 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a new job scheduler
-func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.Logger) *Scheduler {
+func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, cfg *config.Config, logger *zap.Logger) *Scheduler {
 	s := &Scheduler{
 		raftNode: raftNode,
 		fsm:      fsm,
 		applier:  consensus.NewApplyCommand(raftNode),
 		logger:   logger,
+		cfg:      cfg,
 		registry: worker.NewRegistry(),
 		policy:   NewLeastLoadedPolicy(), // Default to least-loaded policy
 		stopCh:   make(chan struct{}),
@@ -50,8 +53,8 @@ func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.
 	}
 
 	s.failureDetector = failover.NewFailureDetector(
-		10*time.Second, // Worker timeout
-		2*time.Second,  // Check interval
+		cfg.Worker.HeartbeatTimeout,
+		2*time.Second, // Check interval
 		onWorkerFailure,
 		logger,
 	)
@@ -160,7 +163,8 @@ func (s *Scheduler) schedulePendingJobs() {
 	// Get available workers
 	workers := s.registry.List()
 	availableWorkers := make([]*worker.WorkerInfo, 0)
-	for _, w := range workers {
+	for i := range workers {
+		w := &workers[i] // Take address of copy
 		if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
 			availableWorkers = append(availableWorkers, w)
 		}
@@ -177,7 +181,9 @@ func (s *Scheduler) schedulePendingJobs() {
 
 		// Re-check available workers (capacity may have changed)
 		availableWorkers = make([]*worker.WorkerInfo, 0)
-		for _, w := range s.registry.List() {
+		freshWorkers := s.registry.List()
+		for i := range freshWorkers {
+			w := &freshWorkers[i] // Take address of copy
 			if w.Status == "active" && w.ActiveJobs < w.MaxConcurrentJobs {
 				availableWorkers = append(availableWorkers, w)
 			}
@@ -281,7 +287,8 @@ func (s *Scheduler) RemoveWorker(workerID string) {
 }
 
 // ListWorkers returns all registered workers
-func (s *Scheduler) ListWorkers() []*worker.WorkerInfo {
+// Returns copies to prevent external mutations
+func (s *Scheduler) ListWorkers() []worker.WorkerInfo {
 	return s.registry.List()
 }
 
@@ -325,7 +332,10 @@ func getPolicyName(policy SchedulingPolicy) string {
 // SetJobStore initializes the recovery manager with a job store
 func (s *Scheduler) SetJobStore(jobStore storage.Store) {
 	if s.recoveryManager == nil {
+		// Create context for recovery manager (could be improved to use parent context)
+		ctx := context.Background()
 		s.recoveryManager = failover.NewRecoveryManager(
+			ctx,           // Parent context for shutdown propagation
 			s,             // Pass scheduler reference
 			jobStore,      // Job storage
 			s.fsm,         // FSM for job state management

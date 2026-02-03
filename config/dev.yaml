@@ -12,6 +12,7 @@ cluster:
 raft:
   heartbeat_timeout: 500ms
   election_timeout: 1s
+  barrier_timeout: 5s
   snapshot_interval: 30s
   snapshot_threshold: 100
 
@@ -19,17 +20,21 @@ grpc:
   master_port: 9000
   worker_port: 9001
   max_msg_size: 4194304
+  dial_timeout: 2s
+  connection_wait: 2s
 
 worker:
   worker_id: dev-worker-1
   master_addr: localhost:9000
   heartbeat_interval: 3s
   heartbeat_timeout: 10s
+  result_timeout: 10s
   max_concurrent_jobs: 5
 
 scheduler:
   scheduling_policy: least-loaded
   job_timeout: 2m
+  assignment_timeout: 5s
   max_retries: 3
   retry_delay: 10s
   rebalance_interval: 30s

@@ -1,6 +1,7 @@
 package failover
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -59,7 +60,8 @@ func TestRecoveryManager_Creation(t *testing.T) {
 	// Mock scheduler
 	scheduler := &mockScheduler{}
 
-	recovery := NewRecoveryManager(scheduler, nil, nil, 3, 100*time.Millisecond, logger)
+	ctx := context.Background()
+	recovery := NewRecoveryManager(ctx, scheduler, nil, nil, 3, 100*time.Millisecond, logger)
 	require.NotNil(t, recovery)
 
 	// Test health check

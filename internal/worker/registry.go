@@ -58,22 +58,29 @@ func (r *Registry) Unregister(id string) {
 }
 
 // Get retrieves worker information by ID
-func (r *Registry) Get(id string) (*WorkerInfo, bool) {
+// Returns a copy to prevent race conditions from external mutations
+func (r *Registry) Get(id string) (WorkerInfo, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	worker, exists := r.workers[id]
-	return worker, exists
+	if !exists {
+		return WorkerInfo{}, false
+	}
+	// Return a copy to prevent caller from mutating internal state
+	return *worker, true
 }
 
 // List returns all registered workers
-func (r *Registry) List() []*WorkerInfo {
+// Returns copies to prevent race conditions from external mutations
+func (r *Registry) List() []WorkerInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	workers := make([]*WorkerInfo, 0, len(r.workers))
+	workers := make([]WorkerInfo, 0, len(r.workers))
 	for _, worker := range r.workers {
-		workers = append(workers, worker)
+		// Return copies to prevent caller from mutating internal state
+		workers = append(workers, *worker)
 	}
 	return workers
 }

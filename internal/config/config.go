@@ -67,14 +67,17 @@ type ClusterConfig struct {
 type RaftConfig struct {
 	HeartbeatTimeout  time.Duration `mapstructure:"heartbeat_timeout"`
 	ElectionTimeout   time.Duration `mapstructure:"election_timeout"`
+	BarrierTimeout    time.Duration `mapstructure:"barrier_timeout"` // Timeout for Raft barrier operations
 	SnapshotInterval  time.Duration `mapstructure:"snapshot_interval"`
 	SnapshotThreshold uint64        `mapstructure:"snapshot_threshold"`
 }
 
 type GRPCConfig struct {
-	MasterPort int `mapstructure:"master_port"`
-	WorkerPort int `mapstructure:"worker_port"`
-	MaxMsgSize int `mapstructure:"max_msg_size"`
+	MasterPort     int           `mapstructure:"master_port"`
+	WorkerPort     int           `mapstructure:"worker_port"`
+	MaxMsgSize     int           `mapstructure:"max_msg_size"`
+	DialTimeout    time.Duration `mapstructure:"dial_timeout"`    // Timeout for establishing gRPC connections
+	ConnectionWait time.Duration `mapstructure:"connection_wait"` // Timeout for waiting on connection state changes
 }
 
 type WorkerConfig struct {
@@ -82,12 +85,14 @@ type WorkerConfig struct {
 	MasterAddr        string        `mapstructure:"master_addr"`
 	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval"`
 	HeartbeatTimeout  time.Duration `mapstructure:"heartbeat_timeout"`
+	ResultTimeout     time.Duration `mapstructure:"result_timeout"` // Timeout for reporting job results
 	MaxConcurrentJobs int           `mapstructure:"max_concurrent_jobs"`
 }
 
 type SchedulerConfig struct {
 	SchedulingPolicy  string        `mapstructure:"scheduling_policy"` // round-robin, least-loaded, priority, random, capacity-aware
 	JobTimeout        time.Duration `mapstructure:"job_timeout"`
+	AssignmentTimeout time.Duration `mapstructure:"assignment_timeout"` // Timeout for assigning job to worker
 	MaxRetries        int           `mapstructure:"max_retries"`
 	RetryDelay        time.Duration `mapstructure:"retry_delay"`
 	RebalanceInterval time.Duration `mapstructure:"rebalance_interval"`
@@ -176,8 +181,11 @@ func Load(configPath string) (*Config, error) {
 
 		if err := v.ReadInConfig(); err != nil {
 			// Config file not found is OK - we'll use defaults and env vars
+			// Check for both viper's error type and os.PathError
 			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-				return nil, fmt.Errorf("error reading config file '%s': %w", profileConfigPath, err)
+				if !os.IsNotExist(err) {
+					return nil, fmt.Errorf("error reading config file '%s': %w", profileConfigPath, err)
+				}
 			}
 		}
 	} else {
@@ -290,17 +298,21 @@ func setCommonDefaults(v *viper.Viper) {
 	v.SetDefault("grpc.master_port", 9000)
 	v.SetDefault("grpc.worker_port", 9001)
 	v.SetDefault("grpc.max_msg_size", 4*1024*1024) // 4MB
+	v.SetDefault("grpc.dial_timeout", "2s")
+	v.SetDefault("grpc.connection_wait", "2s")
 
 	// Worker
 	v.SetDefault("worker.worker_id", "worker-1")
 	v.SetDefault("worker.master_addr", "localhost:9000")
 	v.SetDefault("worker.heartbeat_interval", "3s")
 	v.SetDefault("worker.heartbeat_timeout", "10s")
+	v.SetDefault("worker.result_timeout", "10s")
 	v.SetDefault("worker.max_concurrent_jobs", 10)
 
 	// Scheduler
 	v.SetDefault("scheduler.scheduling_policy", "least-loaded")
 	v.SetDefault("scheduler.job_timeout", "5m")
+	v.SetDefault("scheduler.assignment_timeout", "5s")
 	v.SetDefault("scheduler.max_retries", 3)
 	v.SetDefault("scheduler.retry_delay", "30s")
 	v.SetDefault("scheduler.rebalance_interval", "1m")
@@ -332,6 +344,7 @@ func setDevDefaults(v *viper.Viper) {
 	// Fast timeouts for quick iteration
 	v.SetDefault("raft.heartbeat_timeout", "500ms")
 	v.SetDefault("raft.election_timeout", "1s")
+	v.SetDefault("raft.barrier_timeout", "5s")
 	v.SetDefault("raft.snapshot_interval", "30s")
 	v.SetDefault("raft.snapshot_threshold", uint64(100)) // Snapshot frequently
 
@@ -356,6 +369,7 @@ func setStagingDefaults(v *viper.Viper) {
 	// Production-like timeouts
 	v.SetDefault("raft.heartbeat_timeout", "1s")
 	v.SetDefault("raft.election_timeout", "3s")
+	v.SetDefault("raft.barrier_timeout", "7s")
 	v.SetDefault("raft.snapshot_interval", "120s")
 	v.SetDefault("raft.snapshot_threshold", uint64(8192))
 
@@ -386,6 +400,7 @@ func setProdDefaults(v *viper.Viper) {
 	// Conservative timeouts for stability
 	v.SetDefault("raft.heartbeat_timeout", "1s")
 	v.SetDefault("raft.election_timeout", "5s")
+	v.SetDefault("raft.barrier_timeout", "10s")
 	v.SetDefault("raft.snapshot_interval", "300s")         // 5 minutes
 	v.SetDefault("raft.snapshot_threshold", uint64(16384)) // 16K entries
 
