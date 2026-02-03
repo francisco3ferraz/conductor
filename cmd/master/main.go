@@ -66,6 +66,7 @@ func main() {
 		zap.String("node_id", cfg.Cluster.NodeID),
 		zap.String("bind_addr", cfg.Cluster.BindAddr),
 		zap.Int("grpc_port", cfg.GRPC.MasterPort),
+		zap.String("profile", string(cfg.Profile)),
 	)
 
 	// Initialize storage with BoltDB
@@ -177,16 +178,25 @@ func main() {
 
 	// Initialize auth manager
 	authManager := security.NewAuthManager(&security.JWTConfig{
-		SecretKey:  cfg.Security.JWT.SecretKey,
-		Issuer:     cfg.Security.JWT.Issuer,
-		Audience:   cfg.Security.JWT.Audience,
-		SkipExpiry: cfg.Security.JWT.SkipExpiry,
+		SecretKey:       cfg.Security.JWT.SecretKey,
+		Issuer:          cfg.Security.JWT.Issuer,
+		Audience:        cfg.Security.JWT.Audience,
+		SkipExpiry:      cfg.Security.JWT.SkipExpiry,
+		DevelopmentMode: cfg.Profile == config.ProfileDevelopment,
 	}, logger)
 
 	// Initialize RBAC if enabled
 	var rbac *security.RBAC
+	logger.Info("RBAC configuration",
+		zap.Bool("enabled", cfg.Security.RBAC.Enabled),
+		zap.String("policy_file", cfg.Security.RBAC.PolicyFile))
 	if cfg.Security.RBAC.Enabled {
-		rbac = security.NewRBAC(logger)
+		rbacConfig := &security.RBACConfig{
+			Enabled:         cfg.Security.RBAC.Enabled,
+			DevelopmentMode: cfg.Profile == config.ProfileDevelopment,
+			PolicyFile:      cfg.Security.RBAC.PolicyFile,
+		}
+		rbac = security.NewRBAC(rbacConfig, logger)
 		// Add default admin user for testing
 		if err := rbac.AddUser("admin", "admin", "admin"); err != nil {
 			logger.Fatal("Failed to create admin user", zap.Error(err))

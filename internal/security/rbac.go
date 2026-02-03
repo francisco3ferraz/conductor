@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -92,34 +94,53 @@ func (u *User) HasPermission(perm Permission) bool {
 
 // RBAC implements role-based access control
 type RBAC struct {
-	mu       sync.RWMutex
-	users    map[string]*User        // userID -> User
-	roles    map[string]Role         // roleName -> Role
-	policies map[string][]Permission // method -> required permissions
-	logger   *zap.Logger
+	mu            sync.RWMutex
+	users         map[string]*User // userID -> User
+	roles         map[string]Role  // roleName -> Role (for backward compat)
+	policyManager *PolicyManager
+	config        *RBACConfig
+	logger        *zap.Logger
+	auditLogger   *zap.Logger
+}
+
+// RBACConfig holds RBAC configuration
+type RBACConfig struct {
+	Enabled         bool
+	DevelopmentMode bool   // Explicit dev mode flag
+	PolicyFile      string // Path to policy configuration file
 }
 
 // NewRBAC creates a new RBAC instance
-func NewRBAC(logger *zap.Logger) *RBAC {
-	rbac := &RBAC{
-		users:    make(map[string]*User),
-		roles:    make(map[string]Role),
-		policies: make(map[string][]Permission),
-		logger:   logger,
+func NewRBAC(config *RBACConfig, logger *zap.Logger) *RBAC {
+	policyManager := NewPolicyManager(logger)
+
+	// Load policies from file if specified
+	if config.PolicyFile != "" {
+		if err := policyManager.LoadFromFile(config.PolicyFile); err != nil {
+			logger.Warn("Failed to load policy file, using defaults",
+				zap.String("file", config.PolicyFile),
+				zap.Error(err))
+			policyManager.LoadFromConfig(DefaultPolicyConfig())
+		}
+	} else {
+		// Use default policies
+		policyManager.LoadFromConfig(DefaultPolicyConfig())
 	}
 
-	// Register default roles
+	rbac := &RBAC{
+		users:         make(map[string]*User),
+		roles:         make(map[string]Role),
+		policyManager: policyManager,
+		config:        config,
+		logger:        logger,
+		auditLogger:   logger.Named("rbac-audit"),
+	}
+
+	// Register default roles for backward compatibility
 	rbac.RegisterRole(RoleAdmin)
 	rbac.RegisterRole(RoleOperator)
 	rbac.RegisterRole(RoleViewer)
 	rbac.RegisterRole(RoleWorker)
-
-	// Define method policies
-	rbac.DefinePolicy("/scheduler.Scheduler/SubmitJob", []Permission{PermissionSubmitJob})
-	rbac.DefinePolicy("/scheduler.Scheduler/CancelJob", []Permission{PermissionCancelJob})
-	rbac.DefinePolicy("/scheduler.Scheduler/GetJobStatus", []Permission{PermissionViewJob})
-	rbac.DefinePolicy("/scheduler.Scheduler/ListJobs", []Permission{PermissionListJobs})
-	rbac.DefinePolicy("/scheduler.Scheduler/JoinCluster", []Permission{PermissionManageNodes})
 
 	return rbac
 }
@@ -170,9 +191,19 @@ func (r *RBAC) GetUser(userID string) (*User, error) {
 
 // DefinePolicy defines required permissions for a gRPC method
 func (r *RBAC) DefinePolicy(method string, permissions []Permission) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.policies[method] = permissions
+	// Convert Permission constants to strings for PolicyManager
+	permStrings := make([]string, len(permissions))
+	for i, perm := range permissions {
+		permStrings[i] = string(perm)
+	}
+
+	policy := PolicyDefinition{
+		Method:      method,
+		Permissions: permStrings,
+		Description: fmt.Sprintf("Policy for %s", method),
+	}
+
+	r.policyManager.AddPolicy(policy)
 	r.logger.Debug("Defined policy", zap.String("method", method), zap.Int("permissions", len(permissions)))
 }
 
@@ -188,14 +219,17 @@ func (r *RBAC) CheckPermission(userID string, method string) error {
 	}
 
 	// Get required permissions for method
-	requiredPerms, ok := r.policies[method]
+	// Get required permissions from policy manager
+	requiredPerms, ok := r.policyManager.GetMethodPermissions(method)
 	if !ok {
 		// No policy defined - allow by default
 		return nil
 	}
 
 	// Check if user has any of the required permissions
-	for _, perm := range requiredPerms {
+	for _, permStr := range requiredPerms {
+		// Convert string permission to Permission constant
+		perm := Permission(permStr)
 		if user.HasPermission(perm) {
 			return nil
 		}
@@ -212,51 +246,77 @@ func (r *RBAC) RBACInterceptor() grpc.UnaryServerInterceptor {
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
+		start := time.Now()
+
+		// Extract client address for audit logging
+		clientAddr := "unknown"
+		if p, ok := peer.FromContext(ctx); ok {
+			clientAddr = p.Addr.String()
+		}
+
 		// Skip RBAC for health checks
 		if info.FullMethod == "/grpc.health.v1.Health/Check" {
+			return handler(ctx, req)
+		}
+
+		// Check if RBAC is enabled
+		if !r.config.Enabled {
+			r.logger.Debug("RBAC disabled, allowing request")
 			return handler(ctx, req)
 		}
 
 		// Extract user ID from context (set by auth interceptor)
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
-			r.logger.Warn("RBAC: Missing metadata", zap.String("method", info.FullMethod))
-			// In development, allow requests without metadata
-			// Production: return status.Error(codes.PermissionDenied, "missing metadata")
-			return handler(ctx, req)
+			r.auditLogger.Warn("Authorization failed: missing metadata",
+				zap.String("method", info.FullMethod),
+				zap.String("client", clientAddr),
+				zap.String("reason", "no_metadata"),
+			)
+
+			if r.config.DevelopmentMode {
+				r.logger.Warn("DEV MODE: Allowing request without metadata")
+				return handler(ctx, req)
+			}
+			return nil, status.Error(codes.PermissionDenied, "missing metadata")
 		}
 
 		userIDs := md.Get("user-id")
 		if len(userIDs) == 0 {
-			r.logger.Warn("RBAC: Missing user ID", zap.String("method", info.FullMethod))
-			// In development, allow requests without user ID
-			// Production: return status.Error(codes.PermissionDenied, "missing user id")
-			return handler(ctx, req)
+			r.auditLogger.Warn("Authorization failed: missing user ID",
+				zap.String("method", info.FullMethod),
+				zap.String("client", clientAddr),
+				zap.String("reason", "no_user_id"),
+			)
+
+			if r.config.DevelopmentMode {
+				r.logger.Warn("DEV MODE: Allowing request without user ID")
+				return handler(ctx, req)
+			}
+			return nil, status.Error(codes.PermissionDenied, "missing user id")
 		}
 
 		userID := userIDs[0]
 
 		// Check permissions
 		if err := r.CheckPermission(userID, info.FullMethod); err != nil {
-			r.logger.Warn("RBAC: Permission denied",
+			r.auditLogger.Warn("Authorization failed: permission denied",
 				zap.String("user_id", userID),
 				zap.String("method", info.FullMethod),
+				zap.String("client", clientAddr),
 				zap.Error(err),
+				zap.Duration("latency", time.Since(start)),
 			)
-			return nil, status.Errorf(codes.PermissionDenied, "permission denied: %v", err)
+			return nil, status.Errorf(codes.PermissionDenied, "permission denied")
 		}
 
-		r.logger.Debug("RBAC: Access granted",
+		r.auditLogger.Info("Authorization successful",
 			zap.String("user_id", userID),
 			zap.String("method", info.FullMethod),
+			zap.String("client", clientAddr),
+			zap.Duration("latency", time.Since(start)),
 		)
 
 		return handler(ctx, req)
 	}
-}
-
-// RBACConfig holds RBAC configuration
-type RBACConfig struct {
-	Enabled bool
-	// Add more configuration options as needed
 }

@@ -1,0 +1,77 @@
+{
+  "roles": [
+    {
+      "name": "admin",
+      "description": "Full system administrator with all permissions",
+      "permissions": [
+        "job:submit",
+        "job:view",
+        "job:cancel",
+        "worker:register",
+        "worker:view",
+        "cluster:view",
+        "cluster:manage"
+      ]
+    },
+    {
+      "name": "operator",
+      "description": "System operator with job and worker management permissions",
+      "permissions": [
+        "job:submit",
+        "job:view",
+        "job:cancel",
+        "worker:view",
+        "cluster:view"
+      ]
+    },
+    {
+      "name": "viewer",
+      "description": "Read-only access to system state",
+      "permissions": [
+        "job:view",
+        "worker:view",
+        "cluster:view"
+      ]
+    },
+    {
+      "name": "worker",
+      "description": "Worker node with permission to register and receive jobs",
+      "permissions": [
+        "worker:register",
+        "job:view"
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "method": "/scheduler.Scheduler/SubmitJob",
+      "permissions": ["job:submit"],
+      "description": "Submit a new job to the scheduler"
+    },
+    {
+      "method": "/scheduler.Scheduler/GetJobStatus",
+      "permissions": ["job:view"],
+      "description": "Query job status"
+    },
+    {
+      "method": "/scheduler.Scheduler/CancelJob",
+      "permissions": ["job:cancel"],
+      "description": "Cancel a running or pending job"
+    },
+    {
+      "method": "/worker.Worker/RegisterWorker",
+      "permissions": ["worker:register"],
+      "description": "Register a new worker with the cluster"
+    },
+    {
+      "method": "/worker.Worker/Heartbeat",
+      "permissions": ["worker:register"],
+      "description": "Send worker heartbeat"
+    },
+    {
+      "method": "/scheduler.Scheduler/ListWorkers",
+      "permissions": ["worker:view"],
+      "description": "List all registered workers"
+    }
+  ]
+}
