@@ -76,10 +76,11 @@ type Job struct {
 	TimeoutSeconds int64 // Job timeout in seconds (0 = no timeout)
 }
 
-// New creates a new job
-func New(jobType Type, payload []byte, priority int, maxRetries int, timeoutSeconds int64) *Job {
+// New creates a new job with a globally unique ID
+// nodeID should be the Raft node ID to ensure uniqueness across the cluster
+func New(jobType Type, payload []byte, priority int, maxRetries int, timeoutSeconds int64, nodeID string) *Job {
 	return &Job{
-		ID:             generateID(),
+		ID:             generateID(nodeID),
 		Type:           jobType,
 		Payload:        payload,
 		Priority:       priority,
@@ -206,10 +207,10 @@ func (j *Job) RemainingTimeout() time.Duration {
 	return remaining
 }
 
-// generateID generates a unique job ID
+// generateID generates a unique job ID with node ID for distributed uniqueness
 var idCounter int64
 
-func generateID() string {
+func generateID(nodeID string) string {
 	id := atomic.AddInt64(&idCounter, 1)
-	return fmt.Sprintf("job-%d-%d", time.Now().Unix(), id)
+	return fmt.Sprintf("job-%s-%d-%d", nodeID, time.Now().Unix(), id)
 }

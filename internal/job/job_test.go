@@ -10,7 +10,7 @@ import (
 
 func TestNewJob(t *testing.T) {
 	payload := []byte("test payload")
-	j := New(TypeImageProcessing, payload, 5, 3, 0)
+	j := New(TypeImageProcessing, payload, 5, 3, 0, "test-node")
 
 	assert.NotEmpty(t, j.ID)
 	assert.Equal(t, TypeImageProcessing, j.Type)
@@ -22,7 +22,7 @@ func TestNewJob(t *testing.T) {
 }
 
 func TestJobStateMachine(t *testing.T) {
-	j := New(TypeDataAnalysis, []byte("data"), 1, 3, 0)
+	j := New(TypeDataAnalysis, []byte("data"), 1, 3, 0, "test-node")
 
 	// Test assign
 	err := j.Assign("worker-1")
@@ -50,7 +50,7 @@ func TestJobStateMachine(t *testing.T) {
 }
 
 func TestJobFailAndRetry(t *testing.T) {
-	j := New(TypeWebScraping, []byte("url"), 1, 3, 0)
+	j := New(TypeWebScraping, []byte("url"), 1, 3, 0, "test-node")
 	j.Assign("worker-1")
 	j.Start()
 
@@ -81,14 +81,14 @@ func TestJobFailAndRetry(t *testing.T) {
 }
 
 func TestJobCancel(t *testing.T) {
-	j := New(TypeImageProcessing, []byte("image"), 1, 3, 0)
+	j := New(TypeImageProcessing, []byte("image"), 1, 3, 0, "test-node")
 
 	err := j.Cancel()
 	require.NoError(t, err)
 	assert.Equal(t, StatusCancelled, j.Status)
 
 	// Cannot cancel completed job
-	j2 := New(TypeDataAnalysis, []byte("data"), 1, 3, 0)
+	j2 := New(TypeDataAnalysis, []byte("data"), 1, 3, 0, "test-node")
 	j2.Assign("worker-1")
 	j2.Start()
 	j2.Complete(NewResult([]byte("result"), time.Second))
@@ -98,7 +98,7 @@ func TestJobCancel(t *testing.T) {
 }
 
 func TestJobDuration(t *testing.T) {
-	j := New(TypeWebScraping, []byte("url"), 1, 3, 0)
+	j := New(TypeWebScraping, []byte("url"), 1, 3, 0, "test-node")
 	j.Assign("worker-1")
 
 	time.Sleep(10 * time.Millisecond)
@@ -113,7 +113,7 @@ func TestJobDuration(t *testing.T) {
 
 func TestJobTimeout(t *testing.T) {
 	// Job with 100ms timeout
-	j := New(TypeImageProcessing, []byte("test"), 1, 3, 0) // 0 = no timeout
+	j := New(TypeImageProcessing, []byte("test"), 1, 3, 0, "test-node") // 0 = no timeout
 	j.Assign("worker-1")
 	j.Start()
 
@@ -123,7 +123,7 @@ func TestJobTimeout(t *testing.T) {
 	assert.Equal(t, time.Duration(0), j.RemainingTimeout())
 
 	// Job with actual timeout
-	timeoutJob := New(TypeImageProcessing, []byte("test"), 1, 3, 1) // 1 second timeout
+	timeoutJob := New(TypeImageProcessing, []byte("test"), 1, 3, 1, "test-node") // 1 second timeout
 	timeoutJob.Assign("worker-1")
 
 	// Not timeout before starting

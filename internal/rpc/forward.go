@@ -31,13 +31,65 @@ func NewClientForwarder(logger *zap.Logger) *ClientForwarder {
 func (f *ClientForwarder) getOrCreateConnection(addr string) (*grpc.ClientConn, error) {
 	// Check if we already have a connection
 	if conn, exists := f.connections[addr]; exists {
-		// Check if connection is still healthy
-		if conn.GetState().String() == "READY" || conn.GetState().String() == "IDLE" {
+		state := conn.GetState()
+
+		switch state.String() {
+		case "READY", "IDLE":
+			// Connection is healthy
 			return conn, nil
+
+		case "CONNECTING":
+			// Connection is in progress, wait for it
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			if conn.WaitForStateChange(ctx, state) {
+				// State changed, check if it's now usable
+				newState := conn.GetState()
+				if newState.String() == "READY" || newState.String() == "IDLE" {
+					return conn, nil
+				}
+			}
+			// Timeout or failed to connect, close and recreate
+			f.logger.Warn("Connection timeout while CONNECTING",
+				zap.String("addr", addr),
+				zap.String("state", conn.GetState().String()),
+			)
+			conn.Close()
+			delete(f.connections, addr)
+
+		case "TRANSIENT_FAILURE":
+			// Temporary failure, wait briefly for recovery
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+
+			if conn.WaitForStateChange(ctx, state) {
+				// State changed, check if recovered
+				newState := conn.GetState()
+				if newState.String() == "READY" || newState.String() == "IDLE" {
+					f.logger.Info("Connection recovered from TRANSIENT_FAILURE",
+						zap.String("addr", addr),
+					)
+					return conn, nil
+				}
+			}
+			// Failed to recover, close and recreate
+			f.logger.Warn("Connection failed to recover from TRANSIENT_FAILURE",
+				zap.String("addr", addr),
+				zap.String("final_state", conn.GetState().String()),
+			)
+			conn.Close()
+			delete(f.connections, addr)
+
+		default:
+			// SHUTDOWN or unknown state - close and recreate
+			f.logger.Warn("Connection in invalid state, recreating",
+				zap.String("addr", addr),
+				zap.String("state", state.String()),
+			)
+			conn.Close()
+			delete(f.connections, addr)
 		}
-		// Close stale connection
-		conn.Close()
-		delete(f.connections, addr)
 	}
 
 	// Create new connection

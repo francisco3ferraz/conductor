@@ -83,25 +83,24 @@ func (f *FSM) CreateSnapshot() (*FSMSnapshot, error) {
 func (f *FSM) RestoreFromSnapshot(rc io.ReadCloser) error {
 	defer rc.Close()
 
-	// Create gzip reader for decompression
-	gzReader, err := gzip.NewReader(rc)
+	// Read all data first to avoid consuming the reader
+	data, err := io.ReadAll(rc)
 	if err != nil {
-		// If gzip fails, might be old uncompressed snapshot - try direct decode
+		return err
+	}
+
+	var snapshot struct {
+		Jobs    map[string]*job.Job            `json:"jobs"`
+		Workers map[string]*storage.WorkerInfo `json:"workers"`
+	}
+
+	// Try gzip decompression first
+	gzReader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		// If gzip fails, try uncompressed (backward compatibility)
 		f.logger.Warn("Failed to create gzip reader, trying uncompressed restore", zap.Error(err))
 
-		// Reset reader by creating a new one from the buffered content
-		// This is a fallback for backward compatibility
-		var buf bytes.Buffer
-		if _, err := io.Copy(&buf, rc); err != nil {
-			return err
-		}
-
-		var snapshot struct {
-			Jobs    map[string]*job.Job            `json:"jobs"`
-			Workers map[string]*storage.WorkerInfo `json:"workers"`
-		}
-
-		if err := json.NewDecoder(&buf).Decode(&snapshot); err != nil {
+		if err := json.Unmarshal(data, &snapshot); err != nil {
 			return err
 		}
 
@@ -119,14 +118,8 @@ func (f *FSM) RestoreFromSnapshot(rc io.ReadCloser) error {
 	}
 	defer gzReader.Close()
 
-	var snapshot struct {
-		Jobs    map[string]*job.Job            `json:"jobs"`
-		Workers map[string]*storage.WorkerInfo `json:"workers"`
-	}
-
-	// Use streaming decoder for memory efficiency
-	decoder := json.NewDecoder(gzReader)
-	if err := decoder.Decode(&snapshot); err != nil {
+	// Decode from gzip stream
+	if err := json.NewDecoder(gzReader).Decode(&snapshot); err != nil {
 		return err
 	}
 

@@ -165,6 +165,11 @@ func (rn *RaftNode) Leader() string {
 	return string(rn.raft.Leader())
 }
 
+// NodeID returns the node ID of this Raft node
+func (rn *RaftNode) NodeID() string {
+	return rn.config.NodeID
+}
+
 // Shutdown gracefully shuts down the Raft node
 func (rn *RaftNode) Shutdown() error {
 	rn.logger.Info("Shutting down Raft node")

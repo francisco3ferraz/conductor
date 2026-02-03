@@ -94,8 +94,8 @@ func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobReques
 	// Parse job type
 	jobType := parseJobType(req.Type)
 
-	// Create job
-	j := job.New(jobType, req.Payload, int(req.Priority), int(req.MaxRetries), req.GetTimeoutSeconds())
+	// Create job with node ID for distributed uniqueness
+	j := job.New(jobType, req.Payload, int(req.Priority), int(req.MaxRetries), req.GetTimeoutSeconds(), s.raftNode.NodeID())
 
 	// Add job attributes to span
 	tracing.AddJobAttributes(span, j.ID, jobType.String())
