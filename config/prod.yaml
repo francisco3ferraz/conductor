@@ -1,0 +1,71 @@
+# Production Configuration
+# Maximum stability, security, and performance
+
+cluster:
+  node_id: ${NODE_ID}
+  bind_addr: 0.0.0.0:7000
+  raft_dir: /var/lib/conductor/raft
+  data_dir: /var/lib/conductor/data
+  bootstrap: false
+  join_addr: ${CLUSTER_JOIN_ADDR}
+
+raft:
+  heartbeat_timeout: 1s
+  election_timeout: 5s
+  snapshot_interval: 300s
+  snapshot_threshold: 16384
+
+grpc:
+  master_port: 9000
+  worker_port: 9001
+  max_msg_size: 4194304
+
+worker:
+  worker_id: ${WORKER_ID}
+  master_addr: conductor-master.production.svc:9000
+  heartbeat_interval: 3s
+  heartbeat_timeout: 10s
+  max_concurrent_jobs: 50
+
+scheduler:
+  scheduling_policy: capacity-aware
+  job_timeout: 10m
+  max_retries: 5
+  retry_delay: 60s
+  rebalance_interval: 5m
+
+log:
+  level: warn
+  format: json
+  output: /var/log/conductor/master.log
+  audit_enabled: true
+  audit_output: /var/log/conductor/audit.log
+
+security:
+  tls:
+    enabled: true
+    cert_file: /etc/conductor/certs/server.crt
+    key_file: /etc/conductor/certs/server.key
+    ca_file: /etc/conductor/certs/ca.crt
+    server_name: conductor.production.svc
+    skip_verify: false
+    auto_generate: false
+  jwt:
+    secret_key: ${CONDUCTOR_JWT_SECRET}
+    public_key_path: ""
+    issuer: conductor-production
+    audience: conductor-api
+    access_token_ttl: 15m
+    refresh_token_ttl: 168h
+    skip_expiry: false
+  rbac:
+    enabled: true
+    policy_file: config/rbac-policies.json
+  raft_tls:
+    enabled: true
+    cert_file: /etc/conductor/certs/raft.crt
+    key_file: /etc/conductor/certs/raft.key
+    ca_file: /etc/conductor/certs/ca.crt
+    server_name: conductor-raft.production.svc
+    skip_verify: false
+    auto_generate: false

@@ -61,18 +61,28 @@ func TestValidation(t *testing.T) {
 		{
 			name: "valid config",
 			cfg: Config{
+				Profile: ProfileDevelopment,
 				Cluster: ClusterConfig{
 					NodeID:   "node-1",
 					BindAddr: "127.0.0.1:7000",
+					RaftDir:  "/tmp/raft",
 				},
 				GRPC: GRPCConfig{
 					MasterPort: 9000,
+					WorkerPort: 9001,
 				},
 				Worker: WorkerConfig{
 					MaxConcurrentJobs: 10,
+					HeartbeatInterval: 3 * time.Second,
+					HeartbeatTimeout:  10 * time.Second,
 				},
 				Scheduler: SchedulerConfig{
-					MaxRetries: 3,
+					SchedulingPolicy: "least-loaded",
+					MaxRetries:       3,
+				},
+				Raft: RaftConfig{
+					HeartbeatTimeout: 1 * time.Second,
+					ElectionTimeout:  3 * time.Second,
 				},
 			},
 			wantErr: false,
@@ -115,11 +125,16 @@ func TestValidation(t *testing.T) {
 }
 
 func TestRaftConfigParsing(t *testing.T) {
+	// Development profile has different defaults
+	os.Setenv("CONDUCTOR_PROFILE", "dev")
+	defer os.Unsetenv("CONDUCTOR_PROFILE")
+
 	cfg, err := Load("")
 	require.NoError(t, err)
 
-	assert.Equal(t, 1*time.Second, cfg.Raft.HeartbeatTimeout)
+	// Dev profile has faster timeouts for quick iteration
+	assert.Equal(t, 500*time.Millisecond, cfg.Raft.HeartbeatTimeout)
 	assert.Equal(t, 1*time.Second, cfg.Raft.ElectionTimeout)
-	assert.Equal(t, 120*time.Second, cfg.Raft.SnapshotInterval)
-	assert.Equal(t, uint64(8192), cfg.Raft.SnapshotThreshold)
+	assert.Equal(t, 30*time.Second, cfg.Raft.SnapshotInterval)
+	assert.Equal(t, uint64(100), cfg.Raft.SnapshotThreshold)
 }

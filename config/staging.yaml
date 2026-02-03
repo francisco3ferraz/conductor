@@ -1,0 +1,71 @@
+# Staging Configuration
+# Production-like settings with some debugging capabilities
+
+cluster:
+  node_id: staging-node-1
+  bind_addr: 0.0.0.0:7000
+  raft_dir: /var/lib/conductor/raft
+  data_dir: /var/lib/conductor/data
+  bootstrap: false
+  join_addr: staging-master-1.conductor.svc:7000
+
+raft:
+  heartbeat_timeout: 1s
+  election_timeout: 3s
+  snapshot_interval: 120s
+  snapshot_threshold: 8192
+
+grpc:
+  master_port: 9000
+  worker_port: 9001
+  max_msg_size: 4194304
+
+worker:
+  worker_id: staging-worker-1
+  master_addr: staging-master.conductor.svc:9000
+  heartbeat_interval: 3s
+  heartbeat_timeout: 10s
+  max_concurrent_jobs: 20
+
+scheduler:
+  scheduling_policy: capacity-aware
+  job_timeout: 5m
+  max_retries: 3
+  retry_delay: 30s
+  rebalance_interval: 2m
+
+log:
+  level: info
+  format: json
+  output: /var/log/conductor/master.log
+  audit_enabled: true
+  audit_output: /var/log/conductor/audit.log
+
+security:
+  tls:
+    enabled: true
+    cert_file: /etc/conductor/certs/server.crt
+    key_file: /etc/conductor/certs/server.key
+    ca_file: /etc/conductor/certs/ca.crt
+    server_name: conductor-staging.svc
+    skip_verify: false
+    auto_generate: false
+  jwt:
+    secret_key: ${CONDUCTOR_JWT_SECRET}
+    public_key_path: ""
+    issuer: conductor-staging
+    audience: conductor-api
+    access_token_ttl: 15m
+    refresh_token_ttl: 168h
+    skip_expiry: false
+  rbac:
+    enabled: true
+    policy_file: config/rbac-policies.json
+  raft_tls:
+    enabled: true
+    cert_file: /etc/conductor/certs/raft.crt
+    key_file: /etc/conductor/certs/raft.key
+    ca_file: /etc/conductor/certs/ca.crt
+    server_name: conductor-raft-staging.svc
+    skip_verify: false
+    auto_generate: false

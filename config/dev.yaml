@@ -1,0 +1,71 @@
+# Development Configuration
+# Fast iteration, debug logging, relaxed security
+
+cluster:
+  node_id: dev-node-1
+  bind_addr: 127.0.0.1:7000
+  raft_dir: /tmp/conductor/raft
+  data_dir: /tmp/conductor/data
+  bootstrap: true
+  join_addr: ""
+
+raft:
+  heartbeat_timeout: 500ms
+  election_timeout: 1s
+  snapshot_interval: 30s
+  snapshot_threshold: 100
+
+grpc:
+  master_port: 9000
+  worker_port: 9001
+  max_msg_size: 4194304
+
+worker:
+  worker_id: dev-worker-1
+  master_addr: localhost:9000
+  heartbeat_interval: 3s
+  heartbeat_timeout: 10s
+  max_concurrent_jobs: 5
+
+scheduler:
+  scheduling_policy: least-loaded
+  job_timeout: 2m
+  max_retries: 3
+  retry_delay: 10s
+  rebalance_interval: 30s
+
+log:
+  level: debug
+  format: json
+  output: stdout
+  audit_enabled: true
+  audit_output: stdout
+
+security:
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+    server_name: ""
+    skip_verify: true
+    auto_generate: true
+  jwt:
+    secret_key: dev-secret-key-change-me
+    public_key_path: ""
+    issuer: conductor-dev
+    audience: conductor-api
+    access_token_ttl: 15m
+    refresh_token_ttl: 168h
+    skip_expiry: true
+  rbac:
+    enabled: false
+    policy_file: config/rbac-policies.json
+  raft_tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+    server_name: ""
+    skip_verify: true
+    auto_generate: false
