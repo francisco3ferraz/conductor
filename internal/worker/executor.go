@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -28,10 +31,26 @@ func NewExecutor(workerID string, logger *zap.Logger) *Executor {
 
 // Execute runs a job and returns the result
 func (e *Executor) Execute(ctx context.Context, j *job.Job) *job.Result {
+	// Start tracing span for job execution
+	tracer := tracing.GetTracer("conductor.worker")
+	ctx, span := tracing.StartSpan(ctx, tracer, "worker.execute_job",
+		trace.WithAttributes(
+			attribute.String("job.id", j.ID),
+			attribute.String("job.type", j.Type.String()),
+			attribute.String("worker.id", e.workerID),
+		),
+	)
+	defer span.End()
+
+	// Add job and worker attributes
+	tracing.AddJobAttributes(span, j.ID, j.Type.String())
+	tracing.AddWorkerAttributes(span, e.workerID)
+
 	e.logger.Info("Executing job",
 		zap.String("job_id", j.ID),
 		zap.String("type", j.Type.String()),
 		zap.String("worker_id", e.workerID),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
 	)
 
 	startTime := time.Now()
@@ -40,22 +59,40 @@ func (e *Executor) Execute(ctx context.Context, j *job.Job) *job.Result {
 	var result *job.Result
 	switch j.Type {
 	case job.TypeImageProcessing:
+		span.AddEvent("executing_image_processing")
 		result = e.executeImageProcessing(ctx, j)
 	case job.TypeWebScraping:
+		span.AddEvent("executing_web_scraping")
 		result = e.executeWebScraping(ctx, j)
 	case job.TypeDataAnalysis:
+		span.AddEvent("executing_data_analysis")
 		result = e.executeDataAnalysis(ctx, j)
 	default:
+		span.AddEvent("unknown_job_type")
 		result = job.NewErrorResult(fmt.Errorf("unknown job type: %s", j.Type), 0)
 	}
 
 	duration := time.Since(startTime)
 	result.DurationMs = duration.Milliseconds()
 
+	// Add result attributes to span
+	span.SetAttributes(
+		attribute.Bool("job.success", result.Success),
+		attribute.Int64("job.duration_ms", result.DurationMs),
+	)
+
+	if !result.Success {
+		span.RecordError(fmt.Errorf("job execution failed"))
+		span.AddEvent("job_execution_failed")
+	} else {
+		span.AddEvent("job_execution_completed")
+	}
+
 	e.logger.Info("Job execution complete",
 		zap.String("job_id", j.ID),
 		zap.Bool("success", result.Success),
 		zap.Duration("duration", duration),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
 	)
 
 	return result

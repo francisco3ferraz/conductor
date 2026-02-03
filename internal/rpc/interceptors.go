@@ -4,9 +4,11 @@ import (
 	"context"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
+	grpccodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -23,22 +25,30 @@ func LoggingInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 	) (interface{}, error) {
 		start := time.Now()
 
+		// Extract trace information if available
+		span := oteltrace.SpanFromContext(ctx)
+		traceID := span.SpanContext().TraceID().String()
+
 		// Call the handler
 		resp, err := handler(ctx, req)
 
 		// Log the request
 		duration := time.Since(start)
+		fields := []zap.Field{
+			zap.String("method", info.FullMethod),
+			zap.Duration("duration", duration),
+		}
+
+		// Add trace ID if available
+		if span.SpanContext().IsValid() {
+			fields = append(fields, zap.String("trace_id", traceID))
+		}
+
 		if err != nil {
-			logger.Error("RPC call failed",
-				zap.String("method", info.FullMethod),
-				zap.Duration("duration", duration),
-				zap.Error(err),
-			)
+			fields = append(fields, zap.Error(err))
+			logger.Error("RPC call failed", fields...)
 		} else {
-			logger.Info("RPC call",
-				zap.String("method", info.FullMethod),
-				zap.Duration("duration", duration),
-			)
+			logger.Info("RPC call", fields...)
 		}
 
 		return resp, err
@@ -60,7 +70,7 @@ func RecoveryInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 					zap.Any("panic", r),
 					zap.Stack("stack"),
 				)
-				err = status.Errorf(codes.Internal, "internal server error")
+				err = status.Errorf(grpccodes.Internal, "internal server error")
 			}
 		}()
 
@@ -86,5 +96,23 @@ func ChainInterceptors(interceptors ...grpc.UnaryServerInterceptor) grpc.UnarySe
 			}
 		}
 		return chained(ctx, req)
+	}
+}
+
+// GetServerInterceptors returns the standard gRPC server options with tracing
+func GetServerInterceptors(logger *zap.Logger) []grpc.ServerOption {
+	return []grpc.ServerOption{
+		grpc.StatsHandler(otelgrpc.NewServerHandler()), // OpenTelemetry tracing via stats handler
+		grpc.ChainUnaryInterceptor(
+			LoggingInterceptor(logger),  // Logging with trace IDs
+			RecoveryInterceptor(logger), // Panic recovery
+		),
+	}
+}
+
+// GetClientInterceptors returns the standard gRPC client options with tracing
+func GetClientInterceptors() []grpc.DialOption {
+	return []grpc.DialOption{
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	}
 }

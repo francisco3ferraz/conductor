@@ -20,6 +20,7 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/scheduler"
 	"github.com/francisco3ferraz/conductor/internal/security"
 	"github.com/francisco3ferraz/conductor/internal/storage"
+	"github.com/francisco3ferraz/conductor/internal/tracing"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -42,6 +43,24 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.Sync()
+
+	// Initialize distributed tracing
+	tracingConfig := tracing.DefaultConfig()
+	tracingConfig.ServiceName = "conductor-master"
+	tracingConfig.ServiceVersion = "1.0.0"
+
+	ctx := context.Background()
+	tracingShutdown, err := tracing.Initialize(ctx, tracingConfig)
+	if err != nil {
+		logger.Error("Failed to initialize tracing", zap.Error(err))
+		// Don't exit - tracing is optional in development
+	} else {
+		defer tracingShutdown()
+		logger.Info("Distributed tracing initialized",
+			zap.String("service", tracingConfig.ServiceName),
+			zap.String("endpoint", tracingConfig.OTLPEndpoint),
+		)
+	}
 
 	logger.Info("Starting master node",
 		zap.String("node_id", cfg.Cluster.NodeID),
@@ -175,20 +194,25 @@ func main() {
 		logger.Info("RBAC enabled")
 	}
 
-	// Build interceptor chain
-	interceptors := []grpc.UnaryServerInterceptor{
-		rpc.LoggingInterceptor(logger),
+	// Get tracing-enabled gRPC server options
+	grpcOpts := rpc.GetServerInterceptors(logger)
+
+	// Add additional interceptors
+	additionalInterceptors := []grpc.UnaryServerInterceptor{
 		authManager.AuthInterceptor(),
-		rpc.RecoveryInterceptor(logger),
 	}
 
 	// Add RBAC interceptor if enabled
 	if rbac != nil {
-		interceptors = append(interceptors[:2], append([]grpc.UnaryServerInterceptor{rbac.RBACInterceptor()}, interceptors[2:]...)...)
+		additionalInterceptors = append(additionalInterceptors, rbac.RBACInterceptor())
+	}
+
+	// Combine with existing server options
+	if len(additionalInterceptors) > 0 {
+		grpcOpts = append(grpcOpts, grpc.ChainUnaryInterceptor(additionalInterceptors...))
 	}
 
 	// Load TLS credentials for gRPC if enabled
-	var grpcOpts []grpc.ServerOption
 	if cfg.Security.TLS.Enabled {
 		tlsConfig := &security.TLSConfig{
 			Enabled:      cfg.Security.TLS.Enabled,
@@ -210,9 +234,6 @@ func main() {
 	} else {
 		logger.Warn("gRPC TLS DISABLED - NOT FOR PRODUCTION")
 	}
-
-	// Add interceptor chain
-	grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(rpc.ChainInterceptors(interceptors...)))
 
 	// Create gRPC server with security
 	grpcServer := grpc.NewServer(grpcOpts...)

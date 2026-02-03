@@ -14,6 +14,7 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/rpc"
+	"github.com/francisco3ferraz/conductor/internal/tracing"
 	"github.com/francisco3ferraz/conductor/internal/worker"
 	"google.golang.org/grpc"
 
@@ -36,6 +37,24 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.Sync()
+
+	// Initialize distributed tracing
+	tracingConfig := tracing.DefaultConfig()
+	tracingConfig.ServiceName = "conductor-worker"
+	tracingConfig.ServiceVersion = "1.0.0"
+	
+	ctx := context.Background()
+	tracingShutdown, err := tracing.Initialize(ctx, tracingConfig)
+	if err != nil {
+		logger.Error("Failed to initialize tracing", zap.Error(err))
+		// Don't exit - tracing is optional in development
+	} else {
+		defer tracingShutdown()
+		logger.Info("Distributed tracing initialized",
+			zap.String("service", tracingConfig.ServiceName),
+			zap.String("endpoint", tracingConfig.OTLPEndpoint),
+		)
+	}
 
 	logger.Info("Starting worker node",
 		zap.String("worker_id", cfg.Worker.WorkerID),
@@ -70,8 +89,8 @@ func main() {
 	advertiseAddr := fmt.Sprintf("localhost:%d", cfg.GRPC.WorkerPort)
 
 	// Register with master
-	ctx := context.Background()
-	if err := workerClient.Register(ctx, int32(cfg.Worker.MaxConcurrentJobs), advertiseAddr); err != nil {
+	regCtx := context.Background()
+	if err := workerClient.Register(regCtx, int32(cfg.Worker.MaxConcurrentJobs), advertiseAddr); err != nil {
 		logger.Fatal("Failed to register with master", zap.Error(err))
 	}
 

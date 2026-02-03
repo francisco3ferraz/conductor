@@ -10,6 +10,9 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/failover"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/storage"
+	"github.com/francisco3ferraz/conductor/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -53,10 +56,25 @@ func (s *MasterServer) SetScheduler(scheduler Scheduler) {
 
 // SubmitJob handles job submission via gRPC
 func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobRequest) (*proto.SubmitJobResponse, error) {
+	// Start tracing span for job submission
+	tracer := tracing.GetTracer("conductor.master")
+	ctx, span := tracing.StartSpan(ctx, tracer, "master.submit_job",
+		trace.WithAttributes(
+			attribute.String("job.type", req.Type),
+			attribute.Int("job.priority", int(req.Priority)),
+			attribute.Int("job.max_retries", int(req.MaxRetries)),
+			attribute.Int("job.timeout_seconds", int(req.GetTimeoutSeconds())),
+		),
+	)
+	defer span.End()
+
 	// Check if we're the leader
 	if !s.raftNode.IsLeader() {
+		span.AddEvent("forwarding_to_leader")
 		leader := s.raftNode.Leader()
 		if leader == "" {
+			span.RecordError(fmt.Errorf("no leader available"))
+			span.SetAttributes(attribute.String("error.message", "no leader available"))
 			return &proto.SubmitJobResponse{
 				JobId:   "",
 				Status:  "error",
@@ -67,7 +85,9 @@ func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobReques
 		// Forward request to leader
 		s.logger.Info("Forwarding SubmitJob to leader",
 			zap.String("leader", leader),
+			zap.String("trace_id", span.SpanContext().TraceID().String()),
 		)
+		span.SetAttributes(attribute.String("leader.address", leader))
 		return s.forwarder.ForwardSubmitJob(ctx, leader, req)
 	}
 
@@ -77,14 +97,22 @@ func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobReques
 	// Create job
 	j := job.New(jobType, req.Payload, int(req.Priority), int(req.MaxRetries), req.GetTimeoutSeconds())
 
+	// Add job attributes to span
+	tracing.AddJobAttributes(span, j.ID, jobType.String())
+	span.SetAttributes(attribute.String("job.id", j.ID))
+
 	s.logger.Info("Submitting job via gRPC",
 		zap.String("job_id", j.ID),
 		zap.String("type", req.Type),
 		zap.Int32("priority", req.Priority),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
 	)
 
 	// Apply to Raft cluster
+	span.AddEvent("submitting_to_raft")
 	if err := s.applier.SubmitJob(j); err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error.message", err.Error()))
 		s.logger.Error("Failed to submit job", zap.Error(err))
 		return &proto.SubmitJobResponse{
 			JobId:   "",
@@ -93,6 +121,7 @@ func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobReques
 		}, err
 	}
 
+	span.AddEvent("job_submitted_successfully")
 	return &proto.SubmitJobResponse{
 		JobId:   j.ID,
 		Status:  "success",

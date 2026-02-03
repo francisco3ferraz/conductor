@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,7 +9,10 @@ import (
 
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/storage"
+	"github.com/francisco3ferraz/conductor/internal/tracing"
 	"github.com/hashicorp/raft"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -87,38 +91,61 @@ func NewFSM(logger *zap.Logger) *FSM {
 
 // Apply applies a Raft log entry to the FSM
 func (f *FSM) Apply(log *raft.Log) interface{} {
+	// Create tracing context for Raft operations
+	tracer := tracing.GetTracer("conductor.raft")
+	ctx, span := tracer.Start(context.Background(), "raft.apply_command",
+		trace.WithAttributes(
+			attribute.String("raft.index", fmt.Sprintf("%d", log.Index)),
+			attribute.String("raft.term", fmt.Sprintf("%d", log.Term)),
+		),
+	)
+	defer span.End()
+
 	var cmd Command
 	if err := json.Unmarshal(log.Data, &cmd); err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error.message", "failed to unmarshal command"))
 		f.logger.Error("Failed to unmarshal command", zap.Error(err))
 		return err
 	}
+
+	span.SetAttributes(attribute.String("raft.command_type", cmd.Type))
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	switch cmd.Type {
 	case CommandSubmitJob:
-		return f.applySubmitJob(cmd.Payload)
+		span.AddEvent("applying_submit_job")
+		return f.applySubmitJob(ctx, cmd.Payload)
 	case CommandAssignJob:
-		return f.applyAssignJob(cmd.Payload)
+		span.AddEvent("applying_assign_job")
+		return f.applyAssignJob(ctx, cmd.Payload)
 	case CommandUnassignJob:
-		return f.applyUnassignJob(cmd.Payload)
+		span.AddEvent("applying_unassign_job")
+		return f.applyUnassignJob(ctx, cmd.Payload)
 	case CommandCompleteJob:
-		return f.applyCompleteJob(cmd.Payload)
+		span.AddEvent("applying_complete_job")
+		return f.applyCompleteJob(ctx, cmd.Payload)
 	case CommandFailJob:
-		return f.applyFailJob(cmd.Payload)
+		span.AddEvent("applying_fail_job")
+		return f.applyFailJob(ctx, cmd.Payload)
 	case CommandRegisterWorker:
-		return f.applyRegisterWorker(cmd.Payload)
+		span.AddEvent("applying_register_worker")
+		return f.applyRegisterWorker(ctx, cmd.Payload)
 	case CommandRemoveWorker:
-		return f.applyRemoveWorker(cmd.Payload)
+		span.AddEvent("applying_remove_worker")
+		return f.applyRemoveWorker(ctx, cmd.Payload)
 	default:
 		err := fmt.Errorf("unknown command type: %s", cmd.Type)
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("error.message", err.Error()))
 		f.logger.Error("Unknown command", zap.Error(err))
 		return err
 	}
 }
 
-func (f *FSM) applySubmitJob(payload json.RawMessage) interface{} {
+func (f *FSM) applySubmitJob(ctx context.Context, payload json.RawMessage) interface{} {
 	var p SubmitJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
@@ -129,7 +156,7 @@ func (f *FSM) applySubmitJob(payload json.RawMessage) interface{} {
 	return nil
 }
 
-func (f *FSM) applyAssignJob(payload json.RawMessage) interface{} {
+func (f *FSM) applyAssignJob(ctx context.Context, payload json.RawMessage) interface{} {
 	var p AssignJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
@@ -150,7 +177,7 @@ func (f *FSM) applyAssignJob(payload json.RawMessage) interface{} {
 	return nil
 }
 
-func (f *FSM) applyUnassignJob(payload json.RawMessage) interface{} {
+func (f *FSM) applyUnassignJob(ctx context.Context, payload json.RawMessage) interface{} {
 	var p UnassignJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
@@ -178,7 +205,7 @@ func (f *FSM) applyUnassignJob(payload json.RawMessage) interface{} {
 	return nil
 }
 
-func (f *FSM) applyCompleteJob(payload json.RawMessage) interface{} {
+func (f *FSM) applyCompleteJob(ctx context.Context, payload json.RawMessage) interface{} {
 	var p CompleteJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
@@ -197,7 +224,7 @@ func (f *FSM) applyCompleteJob(payload json.RawMessage) interface{} {
 	return nil
 }
 
-func (f *FSM) applyFailJob(payload json.RawMessage) interface{} {
+func (f *FSM) applyFailJob(ctx context.Context, payload json.RawMessage) interface{} {
 	var p FailJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
@@ -218,7 +245,7 @@ func (f *FSM) applyFailJob(payload json.RawMessage) interface{} {
 	return nil
 }
 
-func (f *FSM) applyRegisterWorker(payload json.RawMessage) interface{} {
+func (f *FSM) applyRegisterWorker(ctx context.Context, payload json.RawMessage) interface{} {
 	var p RegisterWorkerPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
@@ -229,7 +256,7 @@ func (f *FSM) applyRegisterWorker(payload json.RawMessage) interface{} {
 	return nil
 }
 
-func (f *FSM) applyRemoveWorker(payload json.RawMessage) interface{} {
+func (f *FSM) applyRemoveWorker(ctx context.Context, payload json.RawMessage) interface{} {
 	var p RemoveWorkerPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err

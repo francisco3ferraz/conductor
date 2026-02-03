@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/francisco3ferraz/conductor/internal/tracing"
 	"github.com/francisco3ferraz/conductor/pkg/client"
 )
 
@@ -18,6 +19,20 @@ func main() {
 	payload := flag.String("payload", "test data", "Job payload")
 	timeoutSeconds := flag.Int64("timeout", 0, "Job timeout in seconds (0 = no timeout)")
 	flag.Parse()
+
+	// Initialize distributed tracing
+	tracingConfig := tracing.DefaultConfig()
+	tracingConfig.ServiceName = "conductor-client"
+	tracingConfig.ServiceVersion = "1.0.0"
+
+	ctx := context.Background()
+	tracingShutdown, err := tracing.Initialize(ctx, tracingConfig)
+	if err != nil {
+		// Tracing is optional for client
+		log.Printf("Warning: Failed to initialize tracing: %v", err)
+	} else {
+		defer tracingShutdown()
+	}
 
 	// Create client
 	c, err := client.NewClient(*addr)
