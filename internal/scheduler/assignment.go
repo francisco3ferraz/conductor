@@ -13,7 +13,7 @@ import (
 )
 
 // sendJobToWorker sends a job assignment to a worker via gRPC
-func (s *Scheduler) sendJobToWorker(j *job.Job, w *worker.WorkerInfo) error {
+func (s *Scheduler) sendJobToWorker(parentCtx context.Context, j *job.Job, w *worker.WorkerInfo) error {
 	// Connect to worker
 	conn, err := grpc.NewClient(w.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -37,9 +37,8 @@ func (s *Scheduler) sendJobToWorker(j *job.Job, w *worker.WorkerInfo) error {
 		ErrorMessage: j.ErrorMessage,
 	}
 
-	// Send job to worker with timeout
-	// TODO: Accept parent context as parameter to enable cancellation
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Scheduler.AssignmentTimeout)
+	// Send job to worker with timeout, derived from parent context for proper cancellation
+	ctx, cancel := context.WithTimeout(parentCtx, s.cfg.Scheduler.AssignmentTimeout)
 	defer cancel()
 
 	resp, err := client.AssignJob(ctx, &proto.AssignJobRequest{

@@ -74,7 +74,7 @@ type mockScheduler struct {
 	assignmentTriggered bool
 }
 
-func (m *mockScheduler) TriggerAssignment() error {
+func (m *mockScheduler) TriggerAssignment(ctx context.Context) error {
 	m.assignmentTriggered = true
 	return nil
 }

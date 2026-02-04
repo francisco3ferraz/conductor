@@ -89,11 +89,22 @@ func (s *Scheduler) Start(ctx context.Context) {
 			s.logger.Info("Scheduler stopped")
 			return
 		case <-ticker.C:
-			// Only schedule if we're the leader
-			if s.raftNode.IsLeader() {
-				s.schedulePendingJobs()
-				s.checkJobTimeouts()
-			}
+			// Wrap scheduler operations in panic recovery to prevent loop from dying
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						s.logger.Error("Panic in scheduler loop",
+							zap.Any("panic", r),
+							zap.Stack("stack"))
+					}
+				}()
+
+				// Only schedule if we're the leader
+				if s.raftNode.IsLeader() {
+					s.schedulePendingJobs(ctx)
+					s.checkJobTimeouts(ctx)
+				}
+			}()
 		}
 	}
 }
@@ -117,7 +128,7 @@ func (s *Scheduler) Stop() {
 }
 
 // checkJobTimeouts checks for timed out jobs and fails them
-func (s *Scheduler) checkJobTimeouts() {
+func (s *Scheduler) checkJobTimeouts(ctx context.Context) {
 	jobs := s.fsm.ListJobs()
 
 	for _, j := range jobs {
@@ -142,7 +153,7 @@ func (s *Scheduler) checkJobTimeouts() {
 }
 
 // schedulePendingJobs finds pending jobs and assigns them to workers
-func (s *Scheduler) schedulePendingJobs() {
+func (s *Scheduler) schedulePendingJobs(ctx context.Context) {
 	// Get all jobs from FSM
 	jobs := s.fsm.ListJobs()
 
@@ -195,7 +206,12 @@ func (s *Scheduler) schedulePendingJobs() {
 		}
 
 		// Use configured policy to select best worker for this job
-		worker := s.policy.SelectWorker(j, availableWorkers)
+		// Acquire read lock to safely access policy field
+		s.mu.RLock()
+		policy := s.policy
+		s.mu.RUnlock()
+
+		worker := policy.SelectWorker(j, availableWorkers)
 		if worker == nil {
 			s.logger.Warn("Policy returned no worker for job", zap.String("job_id", j.ID))
 			continue
@@ -212,7 +228,7 @@ func (s *Scheduler) schedulePendingJobs() {
 		}
 
 		// Now actually send the job to the worker via gRPC
-		if err := s.sendJobToWorker(j, worker); err != nil {
+		if err := s.sendJobToWorker(ctx, j, worker); err != nil {
 			s.logger.Error("Failed to send job to worker, rolling back assignment",
 				zap.String("job_id", j.ID),
 				zap.String("worker_id", worker.ID),
@@ -347,10 +363,10 @@ func (s *Scheduler) SetJobStore(jobStore storage.Store) {
 }
 
 // TriggerAssignment triggers the job assignment process
-func (s *Scheduler) TriggerAssignment() error {
+func (s *Scheduler) TriggerAssignment(ctx context.Context) error {
 	// This method is called by the recovery manager to reassign jobs
 	// We'll trigger the assignment loop manually
-	go s.schedulePendingJobs()
+	go s.schedulePendingJobs(ctx)
 	return nil
 }
 

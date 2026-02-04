@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -226,7 +227,8 @@ func TestScheduler_SchedulePendingJobs_NoWorkers(t *testing.T) {
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
 	// Schedule without workers - should not crash
-	scheduler.schedulePendingJobs()
+	ctx := context.Background()
+	scheduler.schedulePendingJobs(ctx)
 
 	// No jobs to schedule, just verifying it doesn't crash
 }

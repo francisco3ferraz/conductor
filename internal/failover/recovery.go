@@ -14,7 +14,7 @@ import (
 // SchedulerInterface defines the interface for scheduler interactions
 // This breaks the circular import with the scheduler package
 type SchedulerInterface interface {
-	TriggerAssignment() error
+	TriggerAssignment(ctx context.Context) error
 }
 
 // RecoveryManager handles job recovery and reassignment when workers fail
@@ -221,7 +221,7 @@ func (rm *RecoveryManager) recoverJob(j *job.Job) error {
 	}
 
 	// Attempt to reassign the job to a different worker
-	if err := rm.scheduler.TriggerAssignment(); err != nil {
+	if err := rm.scheduler.TriggerAssignment(rm.ctx); err != nil {
 		rm.logger.Error("Failed to trigger job reassignment",
 			zap.String("job_id", j.ID),
 			zap.Error(err),

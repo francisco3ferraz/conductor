@@ -2,8 +2,9 @@ package job
 
 import (
 	"fmt"
-	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Status represents the current state of a job
@@ -208,9 +209,11 @@ func (j *Job) RemainingTimeout() time.Duration {
 }
 
 // generateID generates a unique job ID with node ID for distributed uniqueness
-var idCounter int64
-
+// Uses UUID to ensure uniqueness even across process restarts and multiple nodes
 func generateID(nodeID string) string {
-	id := atomic.AddInt64(&idCounter, 1)
-	return fmt.Sprintf("job-%s-%d-%d", nodeID, time.Now().Unix(), id)
+	// Combine nodeID + nanosecond timestamp + UUID for guaranteed uniqueness
+	return fmt.Sprintf("job-%s-%d-%s",
+		nodeID,
+		time.Now().UnixNano(),
+		uuid.New().String()[:8])
 }
