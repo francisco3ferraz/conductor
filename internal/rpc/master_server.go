@@ -452,3 +452,17 @@ func parseJobType(typeStr string) job.Type {
 		return job.TypeImageProcessing
 	}
 }
+
+// Shutdown gracefully shuts down the master server and cleans up resources
+func (s *MasterServer) Shutdown() error {
+	s.logger.Info("Shutting down master server")
+
+	// Close forwarder connections
+	if err := s.forwarder.Close(); err != nil {
+		s.logger.Error("Failed to close forwarder connections", zap.Error(err))
+		return err
+	}
+
+	s.logger.Info("Master server shutdown complete")
+	return nil
+}

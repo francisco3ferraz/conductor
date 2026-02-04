@@ -322,6 +322,11 @@ func main() {
 	// Stop scheduler first (stops failover components)
 	sched.Stop()
 
+	// Shutdown master service to close forwarder connections
+	if err := masterSvc.Shutdown(); err != nil {
+		logger.Error("Master service shutdown error", zap.Error(err))
+	}
+
 	// Stop gRPC server
 	grpcServer.GracefulStop()
 
