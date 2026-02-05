@@ -337,10 +337,10 @@ func (x *RemoveWorkerCommand) GetReason() string {
 
 // Snapshot data
 type Snapshot struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Jobs          map[string]*Job        `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Workers       map[string]*WorkerInfo `protobuf:"bytes,2,rep,name=workers,proto3" json:"workers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	LastJobId     int64                  `protobuf:"varint,3,opt,name=last_job_id,json=lastJobId,proto3" json:"last_job_id,omitempty"`
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Jobs          map[string]*Job            `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Workers       map[string]*RaftWorkerInfo `protobuf:"bytes,2,rep,name=workers,proto3" json:"workers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	LastJobId     int64                      `protobuf:"varint,3,opt,name=last_job_id,json=lastJobId,proto3" json:"last_job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -382,7 +382,7 @@ func (x *Snapshot) GetJobs() map[string]*Job {
 	return nil
 }
 
-func (x *Snapshot) GetWorkers() map[string]*WorkerInfo {
+func (x *Snapshot) GetWorkers() map[string]*RaftWorkerInfo {
 	if x != nil {
 		return x.Workers
 	}
@@ -396,7 +396,7 @@ func (x *Snapshot) GetLastJobId() int64 {
 	return 0
 }
 
-type WorkerInfo struct {
+type RaftWorkerInfo struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Address           string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
@@ -408,20 +408,20 @@ type WorkerInfo struct {
 	sizeCache         protoimpl.SizeCache
 }
 
-func (x *WorkerInfo) Reset() {
-	*x = WorkerInfo{}
+func (x *RaftWorkerInfo) Reset() {
+	*x = RaftWorkerInfo{}
 	mi := &file_api_proto_raft_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *WorkerInfo) String() string {
+func (x *RaftWorkerInfo) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*WorkerInfo) ProtoMessage() {}
+func (*RaftWorkerInfo) ProtoMessage() {}
 
-func (x *WorkerInfo) ProtoReflect() protoreflect.Message {
+func (x *RaftWorkerInfo) ProtoReflect() protoreflect.Message {
 	mi := &file_api_proto_raft_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -433,47 +433,47 @@ func (x *WorkerInfo) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use WorkerInfo.ProtoReflect.Descriptor instead.
-func (*WorkerInfo) Descriptor() ([]byte, []int) {
+// Deprecated: Use RaftWorkerInfo.ProtoReflect.Descriptor instead.
+func (*RaftWorkerInfo) Descriptor() ([]byte, []int) {
 	return file_api_proto_raft_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *WorkerInfo) GetId() string {
+func (x *RaftWorkerInfo) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *WorkerInfo) GetAddress() string {
+func (x *RaftWorkerInfo) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
 	return ""
 }
 
-func (x *WorkerInfo) GetMaxConcurrentJobs() int32 {
+func (x *RaftWorkerInfo) GetMaxConcurrentJobs() int32 {
 	if x != nil {
 		return x.MaxConcurrentJobs
 	}
 	return 0
 }
 
-func (x *WorkerInfo) GetActiveJobs() int32 {
+func (x *RaftWorkerInfo) GetActiveJobs() int32 {
 	if x != nil {
 		return x.ActiveJobs
 	}
 	return 0
 }
 
-func (x *WorkerInfo) GetLastHeartbeat() int64 {
+func (x *RaftWorkerInfo) GetLastHeartbeat() int64 {
 	if x != nil {
 		return x.LastHeartbeat
 	}
 	return 0
 }
 
-func (x *WorkerInfo) GetStatus() string {
+func (x *RaftWorkerInfo) GetStatus() string {
 	if x != nil {
 		return x.Status
 	}
@@ -503,7 +503,7 @@ const file_api_proto_raft_proto_rawDesc = "" +
 	"\x13max_concurrent_jobs\x18\x03 \x01(\x05R\x11maxConcurrentJobs\"J\n" +
 	"\x13RemoveWorkerCommand\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xa5\x02\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xa9\x02\n" +
 	"\bSnapshot\x12-\n" +
 	"\x04jobs\x18\x01 \x03(\v2\x19.proto.Snapshot.JobsEntryR\x04jobs\x126\n" +
 	"\aworkers\x18\x02 \x03(\v2\x1c.proto.Snapshot.WorkersEntryR\aworkers\x12\x1e\n" +
@@ -511,12 +511,11 @@ const file_api_proto_raft_proto_rawDesc = "" +
 	"\tJobsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12 \n" +
 	"\x05value\x18\x02 \x01(\v2\n" +
-	".proto.JobR\x05value:\x028\x01\x1aM\n" +
+	".proto.JobR\x05value:\x028\x01\x1aQ\n" +
 	"\fWorkersEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12'\n" +
-	"\x05value\x18\x02 \x01(\v2\x11.proto.WorkerInfoR\x05value:\x028\x01\"\xc6\x01\n" +
-	"\n" +
-	"WorkerInfo\x12\x0e\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12+\n" +
+	"\x05value\x18\x02 \x01(\v2\x15.proto.RaftWorkerInfoR\x05value:\x028\x01\"\xca\x01\n" +
+	"\x0eRaftWorkerInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12.\n" +
 	"\x13max_concurrent_jobs\x18\x03 \x01(\x05R\x11maxConcurrentJobs\x12\x1f\n" +
@@ -546,7 +545,7 @@ var file_api_proto_raft_proto_goTypes = []any{
 	(*RegisterWorkerCommand)(nil), // 4: proto.RegisterWorkerCommand
 	(*RemoveWorkerCommand)(nil),   // 5: proto.RemoveWorkerCommand
 	(*Snapshot)(nil),              // 6: proto.Snapshot
-	(*WorkerInfo)(nil),            // 7: proto.WorkerInfo
+	(*RaftWorkerInfo)(nil),        // 7: proto.RaftWorkerInfo
 	nil,                           // 8: proto.Snapshot.JobsEntry
 	nil,                           // 9: proto.Snapshot.WorkersEntry
 	(*Job)(nil),                   // 10: proto.Job
@@ -558,7 +557,7 @@ var file_api_proto_raft_proto_depIdxs = []int32{
 	8,  // 2: proto.Snapshot.jobs:type_name -> proto.Snapshot.JobsEntry
 	9,  // 3: proto.Snapshot.workers:type_name -> proto.Snapshot.WorkersEntry
 	10, // 4: proto.Snapshot.JobsEntry.value:type_name -> proto.Job
-	7,  // 5: proto.Snapshot.WorkersEntry.value:type_name -> proto.WorkerInfo
+	7,  // 5: proto.Snapshot.WorkersEntry.value:type_name -> proto.RaftWorkerInfo
 	6,  // [6:6] is the sub-list for method output_type
 	6,  // [6:6] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name

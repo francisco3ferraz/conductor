@@ -61,7 +61,7 @@ func TestRecoveryManager_Creation(t *testing.T) {
 	scheduler := &mockScheduler{}
 
 	ctx := context.Background()
-	recovery := NewRecoveryManager(ctx, scheduler, nil, nil, 3, 100*time.Millisecond, logger)
+	recovery := NewRecoveryManager(ctx, scheduler, nil, nil, nil, 3, 100*time.Millisecond, logger)
 	require.NotNil(t, recovery)
 
 	// Test health check

@@ -11,26 +11,23 @@ import (
 	"go.uber.org/zap"
 )
 
-// ResultReporter defines the interface for reporting job results
-type ResultReporter interface {
-	ReportResult(ctx context.Context, jobID string, result *job.Result) error
-}
-
 // WorkerServer implements the gRPC WorkerService
 type WorkerServer struct {
 	proto.UnimplementedWorkerServiceServer
 	workerID string
 	executor *worker.Executor
-	reporter ResultReporter
+	jobQueue *worker.JobQueue
+	reporter worker.ResultReporter
 	logger   *zap.Logger
 	cfg      *config.Config
 }
 
 // NewWorkerServer creates a new worker gRPC server
-func NewWorkerServer(workerID string, exec *worker.Executor, reporter ResultReporter, cfg *config.Config, logger *zap.Logger) *WorkerServer {
+func NewWorkerServer(workerID string, exec *worker.Executor, jobQueue *worker.JobQueue, reporter worker.ResultReporter, cfg *config.Config, logger *zap.Logger) *WorkerServer {
 	return &WorkerServer{
 		workerID: workerID,
 		executor: exec,
+		jobQueue: jobQueue,
 		reporter: reporter,
 		logger:   logger,
 		cfg:      cfg,
@@ -42,35 +39,18 @@ func (w *WorkerServer) AssignJob(ctx context.Context, req *proto.AssignJobReques
 	w.logger.Info("Received job assignment",
 		zap.String("job_id", req.Job.Id),
 		zap.String("type", req.Job.Type),
+		zap.Int32("priority", req.Job.Priority),
 	)
 
 	// Convert proto.Job to job.Job
 	j := protoToJob(req.Job)
 
-	// Execute job in goroutine with context propagation
-	go func(jobCtx context.Context) {
-		// Mark job as running (start it)
-		j.Start()
-
-		// Execute the job with parent context
-		result := w.executor.Execute(jobCtx, j)
-
-		// Report result back to master with timeout
-		if w.reporter != nil {
-			reportCtx, cancel := context.WithTimeout(context.Background(), w.cfg.Worker.ResultTimeout)
-			defer cancel()
-			if err := w.reporter.ReportResult(reportCtx, j.ID, result); err != nil {
-				w.logger.Error("Failed to report job result",
-					zap.String("job_id", j.ID),
-					zap.Error(err),
-				)
-			}
-		}
-	}(ctx)
+	// Enqueue job for priority-based execution
+	w.jobQueue.Enqueue(ctx, j)
 
 	return &proto.AssignJobResponse{
 		Accepted: true,
-		Message:  "Job accepted for execution",
+		Message:  "Job accepted and queued for execution",
 	}, nil
 }
 

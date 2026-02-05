@@ -19,16 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MasterService_SubmitJob_FullMethodName      = "/proto.MasterService/SubmitJob"
-	MasterService_GetJobStatus_FullMethodName   = "/proto.MasterService/GetJobStatus"
-	MasterService_ListJobs_FullMethodName       = "/proto.MasterService/ListJobs"
-	MasterService_CancelJob_FullMethodName      = "/proto.MasterService/CancelJob"
-	MasterService_JoinCluster_FullMethodName    = "/proto.MasterService/JoinCluster"
-	MasterService_RegisterWorker_FullMethodName = "/proto.MasterService/RegisterWorker"
-	MasterService_Heartbeat_FullMethodName      = "/proto.MasterService/Heartbeat"
-	MasterService_ReportResult_FullMethodName   = "/proto.MasterService/ReportResult"
-	MasterService_ListDLQ_FullMethodName        = "/proto.MasterService/ListDLQ"
-	MasterService_RetryFromDLQ_FullMethodName   = "/proto.MasterService/RetryFromDLQ"
+	MasterService_SubmitJob_FullMethodName        = "/proto.MasterService/SubmitJob"
+	MasterService_GetJobStatus_FullMethodName     = "/proto.MasterService/GetJobStatus"
+	MasterService_ListJobs_FullMethodName         = "/proto.MasterService/ListJobs"
+	MasterService_CancelJob_FullMethodName        = "/proto.MasterService/CancelJob"
+	MasterService_JoinCluster_FullMethodName      = "/proto.MasterService/JoinCluster"
+	MasterService_RegisterWorker_FullMethodName   = "/proto.MasterService/RegisterWorker"
+	MasterService_Heartbeat_FullMethodName        = "/proto.MasterService/Heartbeat"
+	MasterService_ReportResult_FullMethodName     = "/proto.MasterService/ReportResult"
+	MasterService_ListDLQ_FullMethodName          = "/proto.MasterService/ListDLQ"
+	MasterService_RetryFromDLQ_FullMethodName     = "/proto.MasterService/RetryFromDLQ"
+	MasterService_GetClusterHealth_FullMethodName = "/proto.MasterService/GetClusterHealth"
+	MasterService_ListWorkers_FullMethodName      = "/proto.MasterService/ListWorkers"
 )
 
 // MasterServiceClient is the client API for MasterService service.
@@ -49,6 +51,9 @@ type MasterServiceClient interface {
 	// Dead Letter Queue operations
 	ListDLQ(ctx context.Context, in *ListDLQRequest, opts ...grpc.CallOption) (*ListDLQResponse, error)
 	RetryFromDLQ(ctx context.Context, in *RetryFromDLQRequest, opts ...grpc.CallOption) (*RetryFromDLQResponse, error)
+	// Cluster state and health
+	GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error)
+	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*ListWorkersResponse, error)
 }
 
 type masterServiceClient struct {
@@ -159,6 +164,26 @@ func (c *masterServiceClient) RetryFromDLQ(ctx context.Context, in *RetryFromDLQ
 	return out, nil
 }
 
+func (c *masterServiceClient) GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetClusterHealthResponse)
+	err := c.cc.Invoke(ctx, MasterService_GetClusterHealth_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *masterServiceClient) ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*ListWorkersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkersResponse)
+	err := c.cc.Invoke(ctx, MasterService_ListWorkers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MasterServiceServer is the server API for MasterService service.
 // All implementations must embed UnimplementedMasterServiceServer
 // for forward compatibility.
@@ -177,6 +202,9 @@ type MasterServiceServer interface {
 	// Dead Letter Queue operations
 	ListDLQ(context.Context, *ListDLQRequest) (*ListDLQResponse, error)
 	RetryFromDLQ(context.Context, *RetryFromDLQRequest) (*RetryFromDLQResponse, error)
+	// Cluster state and health
+	GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error)
+	ListWorkers(context.Context, *ListWorkersRequest) (*ListWorkersResponse, error)
 	mustEmbedUnimplementedMasterServiceServer()
 }
 
@@ -216,6 +244,12 @@ func (UnimplementedMasterServiceServer) ListDLQ(context.Context, *ListDLQRequest
 }
 func (UnimplementedMasterServiceServer) RetryFromDLQ(context.Context, *RetryFromDLQRequest) (*RetryFromDLQResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RetryFromDLQ not implemented")
+}
+func (UnimplementedMasterServiceServer) GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetClusterHealth not implemented")
+}
+func (UnimplementedMasterServiceServer) ListWorkers(context.Context, *ListWorkersRequest) (*ListWorkersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListWorkers not implemented")
 }
 func (UnimplementedMasterServiceServer) mustEmbedUnimplementedMasterServiceServer() {}
 func (UnimplementedMasterServiceServer) testEmbeddedByValue()                       {}
@@ -418,6 +452,42 @@ func _MasterService_RetryFromDLQ_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MasterService_GetClusterHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetClusterHealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MasterServiceServer).GetClusterHealth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MasterService_GetClusterHealth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MasterServiceServer).GetClusterHealth(ctx, req.(*GetClusterHealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MasterService_ListWorkers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MasterServiceServer).ListWorkers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MasterService_ListWorkers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MasterServiceServer).ListWorkers(ctx, req.(*ListWorkersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MasterService_ServiceDesc is the grpc.ServiceDesc for MasterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -464,6 +534,14 @@ var MasterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RetryFromDLQ",
 			Handler:    _MasterService_RetryFromDLQ_Handler,
+		},
+		{
+			MethodName: "GetClusterHealth",
+			Handler:    _MasterService_GetClusterHealth_Handler,
+		},
+		{
+			MethodName: "ListWorkers",
+			Handler:    _MasterService_ListWorkers_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

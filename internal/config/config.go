@@ -96,6 +96,7 @@ type SchedulerConfig struct {
 	MaxRetries        int           `mapstructure:"max_retries"`
 	RetryDelay        time.Duration `mapstructure:"retry_delay"`
 	RebalanceInterval time.Duration `mapstructure:"rebalance_interval"`
+	MaxPendingJobs    int           `mapstructure:"max_pending_jobs"` // Maximum number of pending jobs allowed (backpressure)
 }
 
 type LogConfig struct {
@@ -316,6 +317,7 @@ func setCommonDefaults(v *viper.Viper) {
 	v.SetDefault("scheduler.max_retries", 3)
 	v.SetDefault("scheduler.retry_delay", "30s")
 	v.SetDefault("scheduler.rebalance_interval", "1m")
+	v.SetDefault("scheduler.max_pending_jobs", 10000) // Backpressure limit
 
 	// Logging
 	v.SetDefault("log.level", "info")

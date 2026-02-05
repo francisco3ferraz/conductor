@@ -118,6 +118,34 @@ func (r *Registry) MarkInactive(timeout time.Duration) []string {
 	return inactive
 }
 
+// CountActive returns the number of active workers
+func (r *Registry) CountActive() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	count := 0
+	for _, worker := range r.workers {
+		if worker.Status == "active" {
+			count++
+		}
+	}
+	return count
+}
+
+// CountAvailable returns the number of workers with available capacity
+func (r *Registry) CountAvailable() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	count := 0
+	for _, worker := range r.workers {
+		if worker.Status == "active" && worker.ActiveJobs < worker.MaxConcurrentJobs {
+			count++
+		}
+	}
+	return count
+}
+
 // ToStorageWorkerInfo converts WorkerInfo to storage.WorkerInfo
 func (w *WorkerInfo) ToStorageWorkerInfo() *storage.WorkerInfo {
 	return &storage.WorkerInfo{

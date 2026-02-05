@@ -456,3 +456,25 @@ func (s *Scheduler) GetFailureDetector() *failover.FailureDetector {
 func (s *Scheduler) GetRecoveryManager() *failover.RecoveryManager {
 	return s.recoveryManager
 }
+
+// GetWorkerCount returns the number of active workers
+func (s *Scheduler) GetWorkerCount() int {
+	return s.registry.CountActive()
+}
+
+// GetAvailableWorkerCount returns the number of workers with available capacity
+func (s *Scheduler) GetAvailableWorkerCount() int {
+	return s.registry.CountAvailable()
+}
+
+// GetPendingJobCount returns the number of pending jobs
+func (s *Scheduler) GetPendingJobCount() int {
+	jobs := s.fsm.ListJobs()
+	count := 0
+	for _, j := range jobs {
+		if j.Status == job.StatusPending {
+			count++
+		}
+	}
+	return count
+}

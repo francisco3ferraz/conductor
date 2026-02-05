@@ -6,11 +6,13 @@ import (
 	"time"
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
+	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/failover"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"github.com/francisco3ferraz/conductor/internal/tracing"
+	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -25,6 +27,10 @@ type Scheduler interface {
 	GetFailureDetector() *failover.FailureDetector
 	GetRecoveryManager() *failover.RecoveryManager
 	CancelJobOnWorker(ctx context.Context, jobID, workerID, reason string) error
+	GetWorkerCount() int
+	GetAvailableWorkerCount() int
+	GetPendingJobCount() int
+	ListWorkers() []worker.WorkerInfo
 }
 
 // MasterServer implements the gRPC MasterService
@@ -35,16 +41,18 @@ type MasterServer struct {
 	applier   *consensus.ApplyCommand
 	scheduler Scheduler
 	forwarder *ClientForwarder
+	cfg       *config.Config
 	logger    *zap.Logger
 }
 
 // NewMasterServer creates a new master gRPC server
-func NewMasterServer(raftNode *consensus.RaftNode, fsm *consensus.FSM, logger *zap.Logger) *MasterServer {
+func NewMasterServer(raftNode *consensus.RaftNode, fsm *consensus.FSM, cfg *config.Config, logger *zap.Logger) *MasterServer {
 	return &MasterServer{
 		raftNode:  raftNode,
 		fsm:       fsm,
 		applier:   consensus.NewApplyCommand(raftNode),
 		forwarder: NewClientForwarder(logger),
+		cfg:       cfg,
 		logger:    logger,
 	}
 }
@@ -89,6 +97,46 @@ func (s *MasterServer) SubmitJob(ctx context.Context, req *proto.SubmitJobReques
 		)
 		span.SetAttributes(attribute.String("leader.address", leader))
 		return s.forwarder.ForwardSubmitJob(ctx, leader, req)
+	}
+
+	// BACKPRESSURE CHECK 1: Check if any workers are available
+	if s.scheduler != nil {
+		workerCount := s.scheduler.GetWorkerCount()
+		if workerCount == 0 {
+			err := fmt.Errorf("system degraded: no workers available")
+			span.RecordError(err)
+			span.AddEvent("no_workers_available")
+			s.logger.Warn("Rejecting job submission - no workers available")
+			return &proto.SubmitJobResponse{
+				JobId:   "",
+				Status:  "unavailable",
+				Message: "Service temporarily unavailable: no workers online. Please try again later.",
+			}, err
+		}
+	}
+
+	// BACKPRESSURE CHECK 2: Check pending jobs limit
+	if s.scheduler != nil && s.cfg != nil {
+		pendingCount := s.scheduler.GetPendingJobCount()
+		maxPending := s.cfg.Scheduler.MaxPendingJobs
+		if maxPending > 0 && pendingCount >= maxPending {
+			err := fmt.Errorf("system overloaded: pending jobs limit reached (%d/%d)", pendingCount, maxPending)
+			span.RecordError(err)
+			span.AddEvent("pending_jobs_limit_reached")
+			span.SetAttributes(
+				attribute.Int("pending_jobs", pendingCount),
+				attribute.Int("max_pending_jobs", maxPending),
+			)
+			s.logger.Warn("Rejecting job submission - pending jobs limit reached",
+				zap.Int("pending", pendingCount),
+				zap.Int("max", maxPending),
+			)
+			return &proto.SubmitJobResponse{
+				JobId:   "",
+				Status:  "overloaded",
+				Message: fmt.Sprintf("System overloaded: %d pending jobs (max: %d). Please try again later.", pendingCount, maxPending),
+			}, err
+		}
 	}
 
 	// Parse job type
@@ -593,5 +641,105 @@ func (s *MasterServer) RetryFromDLQ(ctx context.Context, req *proto.RetryFromDLQ
 	return &proto.RetryFromDLQResponse{
 		Success: true,
 		Message: "Job successfully retried from DLQ",
+	}, nil
+}
+
+// GetClusterHealth returns cluster health status
+func (s *MasterServer) GetClusterHealth(ctx context.Context, req *proto.GetClusterHealthRequest) (*proto.GetClusterHealthResponse, error) {
+	// Get Raft state
+	isLeader := s.raftNode.IsLeader()
+	leaderAddr := s.raftNode.Leader()
+	nodeID := s.raftNode.NodeID()
+
+	// Get job counts
+	jobs := s.fsm.ListJobs()
+	pendingCount := 0
+	runningCount := 0
+	for _, j := range jobs {
+		switch j.Status {
+		case job.StatusPending:
+			pendingCount++
+		case job.StatusRunning:
+			runningCount++
+		}
+	}
+
+	// Get DLQ count
+	dlqJobs := s.fsm.ListDLQJobs()
+	dlqCount := len(dlqJobs)
+
+	// Get worker counts
+	var workerCount, activeWorkerCount int
+	if s.scheduler != nil {
+		workerCount = s.scheduler.GetWorkerCount()
+		activeWorkerCount = s.scheduler.GetAvailableWorkerCount()
+	}
+
+	// Determine Raft state string
+	raftState := "Follower"
+	if isLeader {
+		raftState = "Leader"
+	}
+
+	s.logger.Debug("Cluster health check",
+		zap.Bool("is_leader", isLeader),
+		zap.String("leader", leaderAddr),
+		zap.Int("workers", workerCount),
+		zap.Int("pending_jobs", pendingCount),
+		zap.Int("running_jobs", runningCount))
+
+	return &proto.GetClusterHealthResponse{
+		LeaderId:          nodeID,
+		LeaderAddress:     leaderAddr,
+		IsLeader:          isLeader,
+		WorkerCount:       int32(workerCount),
+		ActiveWorkerCount: int32(activeWorkerCount),
+		PendingJobs:       int32(pendingCount),
+		RunningJobs:       int32(runningCount),
+		DlqJobs:           int32(dlqCount),
+		RaftState:         raftState,
+	}, nil
+}
+
+// ListWorkers returns the list of all workers
+func (s *MasterServer) ListWorkers(ctx context.Context, req *proto.ListWorkersRequest) (*proto.ListWorkersResponse, error) {
+	if s.scheduler == nil {
+		return &proto.ListWorkersResponse{
+			Workers: []*proto.WorkerInfo{},
+			Total:   0,
+		}, nil
+	}
+
+	workers := s.scheduler.ListWorkers()
+
+	// Filter by status if requested
+	filteredWorkers := make([]worker.WorkerInfo, 0, len(workers))
+	for _, w := range workers {
+		if req.StatusFilter == "" || w.Status == req.StatusFilter {
+			filteredWorkers = append(filteredWorkers, w)
+		}
+	}
+
+	// Convert to proto
+	protoWorkers := make([]*proto.WorkerInfo, len(filteredWorkers))
+	for i, w := range filteredWorkers {
+		protoWorkers[i] = &proto.WorkerInfo{
+			Id:                w.ID,
+			Address:           w.Address,
+			MaxConcurrentJobs: int32(w.MaxConcurrentJobs),
+			ActiveJobs:        int32(w.ActiveJobs),
+			Status:            w.Status,
+			LastHeartbeat:     timestamppb.New(w.LastHeartbeat),
+			Capabilities:      make(map[string]string), // Empty for now
+		}
+	}
+
+	s.logger.Debug("Listed workers",
+		zap.Int("total", len(protoWorkers)),
+		zap.String("status_filter", req.StatusFilter))
+
+	return &proto.ListWorkersResponse{
+		Workers: protoWorkers,
+		Total:   int32(len(protoWorkers)),
 	}, nil
 }

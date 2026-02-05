@@ -163,6 +163,11 @@ func main() {
 		logger:   logger,
 	}
 
+	// Create priority job queue
+	jobQueue := worker.NewJobQueue(exec, resultReporter, cfg.Worker.MaxConcurrentJobs, logger)
+	jobQueue.Start()
+	defer jobQueue.Stop()
+
 	// Create gRPC server with interceptors
 	interceptors := []grpc.UnaryServerInterceptor{
 		rpc.LoggingInterceptor(logger),
@@ -171,7 +176,7 @@ func main() {
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(rpc.ChainInterceptors(interceptors...)),
 	)
-	workerSvc := rpc.NewWorkerServer(cfg.Worker.WorkerID, exec, resultReporter, cfg, logger)
+	workerSvc := rpc.NewWorkerServer(cfg.Worker.WorkerID, exec, jobQueue, resultReporter, cfg, logger)
 	proto.RegisterWorkerServiceServer(grpcServer, workerSvc)
 
 	workerAddr := fmt.Sprintf(":%d", cfg.GRPC.WorkerPort)

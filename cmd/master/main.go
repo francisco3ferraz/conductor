@@ -258,7 +258,7 @@ func main() {
 
 	// Create gRPC server with security
 	grpcServer := grpc.NewServer(grpcOpts...)
-	masterSvc := rpc.NewMasterServer(raftNode, fsm, logger)
+	masterSvc := rpc.NewMasterServer(raftNode, fsm, cfg, logger)
 	proto.RegisterMasterServiceServer(grpcServer, masterSvc)
 
 	// Create and start scheduler
