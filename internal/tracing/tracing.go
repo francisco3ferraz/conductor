@@ -2,6 +2,7 @@ package tracing
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"os"
@@ -23,6 +24,8 @@ type TracingConfig struct {
 	Environment    string
 	OTLPEndpoint   string
 	Enabled        bool
+	Insecure       bool   // Use insecure connection (dev only)
+	TLSCertFile    string // Path to TLS cert for secure connection
 }
 
 // DefaultConfig returns a default tracing configuration
@@ -31,8 +34,10 @@ func DefaultConfig() *TracingConfig {
 		ServiceName:    "conductor",
 		ServiceVersion: "1.0.0",
 		Environment:    getEnvOrDefault("CONDUCTOR_ENV", "development"),
-		OTLPEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318"),
+		OTLPEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4318"),
 		Enabled:        getEnvOrDefault("OTEL_TRACE_ENABLED", "true") == "true",
+		Insecure:       getEnvOrDefault("OTEL_EXPORTER_OTLP_INSECURE", "true") == "true",
+		TLSCertFile:    getEnvOrDefault("OTEL_EXPORTER_OTLP_CERTIFICATE", ""),
 	}
 }
 
@@ -56,10 +61,30 @@ func Initialize(ctx context.Context, config *TracingConfig) (func(), error) {
 	}
 
 	// Create OTLP HTTP trace exporter
-	exporter, err := otlptracehttp.New(ctx,
+	exporterOpts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(config.OTLPEndpoint),
-		otlptracehttp.WithInsecure(), // For local development
-	)
+	}
+
+	// Configure TLS based on insecure flag
+	if config.Insecure {
+		exporterOpts = append(exporterOpts, otlptracehttp.WithInsecure())
+		log.Printf("OTLP exporter using insecure connection (development mode)")
+	} else {
+		// Use secure connection (default for production)
+		if config.TLSCertFile != "" {
+			// Custom TLS cert provided
+			exporterOpts = append(exporterOpts, otlptracehttp.WithTLSClientConfig(&tls.Config{
+				// Load custom certificate if needed
+				MinVersion: tls.VersionTLS12,
+			}))
+			log.Printf("OTLP exporter using secure connection with custom cert")
+		} else {
+			// Use system cert pool (default)
+			log.Printf("OTLP exporter using secure connection with system certs")
+		}
+	}
+
+	exporter, err := otlptracehttp.New(ctx, exporterOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}

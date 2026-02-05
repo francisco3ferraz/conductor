@@ -48,6 +48,16 @@ func main() {
 	tracingConfig := tracing.DefaultConfig()
 	tracingConfig.ServiceName = "conductor-master"
 	tracingConfig.ServiceVersion = "1.0.0"
+	tracingConfig.Environment = string(cfg.Profile)
+
+	// Match tracing security to profile (production = secure, dev = insecure)
+	if cfg.Profile == config.ProfileProduction || cfg.Profile == config.ProfileStaging {
+		tracingConfig.Insecure = false
+		logger.Info("Tracing configured for secure OTLP connection")
+	} else {
+		tracingConfig.Insecure = true
+		logger.Info("Tracing configured for insecure OTLP connection (development mode)")
+	}
 
 	ctx := context.Background()
 	tracingShutdown, err := tracing.Initialize(ctx, tracingConfig)
@@ -59,6 +69,7 @@ func main() {
 		logger.Info("Distributed tracing initialized",
 			zap.String("service", tracingConfig.ServiceName),
 			zap.String("endpoint", tracingConfig.OTLPEndpoint),
+			zap.Bool("secure", !tracingConfig.Insecure),
 		)
 	}
 
@@ -249,7 +260,6 @@ func main() {
 	grpcServer := grpc.NewServer(grpcOpts...)
 	masterSvc := rpc.NewMasterServer(raftNode, fsm, logger)
 	proto.RegisterMasterServiceServer(grpcServer, masterSvc)
-	proto.RegisterWorkerServiceServer(grpcServer, masterSvc)
 
 	// Create and start scheduler
 	sched := scheduler.NewScheduler(raftNode, fsm, cfg, logger)

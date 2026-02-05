@@ -10,6 +10,7 @@ import "api/proto/scheduler.proto";
 // WorkerService handles job assignment from master to worker
 service WorkerService {
   rpc AssignJob(AssignJobRequest) returns (AssignJobResponse);
+  rpc CancelJob(WorkerCancelJobRequest) returns (WorkerCancelJobResponse);
 }
 
 // Job assignment from master to worker
@@ -20,5 +21,17 @@ message AssignJobRequest {
 
 message AssignJobResponse {
   bool accepted = 1;
+  string message = 2;
+}
+
+// Job cancellation from master to worker
+message WorkerCancelJobRequest {
+  string worker_id = 1;
+  string job_id = 2;
+  string reason = 3; // e.g., "timeout", "user_cancelled"
+}
+
+message WorkerCancelJobResponse {
+  bool cancelled = 1;
   string message = 2;
 }

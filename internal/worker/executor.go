@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/francisco3ferraz/conductor/internal/job"
@@ -18,6 +19,7 @@ type Executor struct {
 	workerID  string
 	logger    *zap.Logger
 	executing map[string]context.CancelFunc // job ID -> cancel func
+	mu        sync.RWMutex                  // protects executing map
 }
 
 // NewExecutor creates a new job executor
@@ -31,9 +33,25 @@ func NewExecutor(workerID string, logger *zap.Logger) *Executor {
 
 // Execute runs a job and returns the result
 func (e *Executor) Execute(ctx context.Context, j *job.Job) *job.Result {
+	// Create cancellable context for this job
+	jobCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Register cancel function so job can be cancelled externally
+	e.mu.Lock()
+	e.executing[j.ID] = cancel
+	e.mu.Unlock()
+
+	// Ensure cleanup on exit
+	defer func() {
+		e.mu.Lock()
+		delete(e.executing, j.ID)
+		e.mu.Unlock()
+	}()
+
 	// Start tracing span for job execution
 	tracer := tracing.GetTracer("conductor.worker")
-	ctx, span := tracing.StartSpan(ctx, tracer, "worker.execute_job",
+	jobCtx, span := tracing.StartSpan(jobCtx, tracer, "worker.execute_job",
 		trace.WithAttributes(
 			attribute.String("job.id", j.ID),
 			attribute.String("job.type", j.Type.String()),
@@ -60,13 +78,13 @@ func (e *Executor) Execute(ctx context.Context, j *job.Job) *job.Result {
 	switch j.Type {
 	case job.TypeImageProcessing:
 		span.AddEvent("executing_image_processing")
-		result = e.executeImageProcessing(ctx, j)
+		result = e.executeImageProcessing(jobCtx, j)
 	case job.TypeWebScraping:
 		span.AddEvent("executing_web_scraping")
-		result = e.executeWebScraping(ctx, j)
+		result = e.executeWebScraping(jobCtx, j)
 	case job.TypeDataAnalysis:
 		span.AddEvent("executing_data_analysis")
-		result = e.executeDataAnalysis(ctx, j)
+		result = e.executeDataAnalysis(jobCtx, j)
 	default:
 		span.AddEvent("unknown_job_type")
 		result = job.NewErrorResult(fmt.Errorf("unknown job type: %s", j.Type), 0)
@@ -148,16 +166,23 @@ func (e *Executor) executeDataAnalysis(ctx context.Context, j *job.Job) *job.Res
 }
 
 // Cancel cancels a running job
-func (e *Executor) Cancel(jobID string) {
+func (e *Executor) Cancel(jobID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if cancel, ok := e.executing[jobID]; ok {
 		cancel()
 		delete(e.executing, jobID)
 		e.logger.Info("Cancelled job", zap.String("job_id", jobID))
+		return true
 	}
+	return false
 }
 
 // IsExecuting returns true if the job is currently executing
 func (e *Executor) IsExecuting(jobID string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	_, ok := e.executing[jobID]
 	return ok
 }

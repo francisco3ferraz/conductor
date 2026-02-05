@@ -127,6 +127,119 @@ func (x *AssignJobResponse) GetMessage() string {
 	return ""
 }
 
+// Job cancellation from master to worker
+type WorkerCancelJobRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkerId      string                 `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	JobId         string                 `protobuf:"bytes,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"` // e.g., "timeout", "user_cancelled"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerCancelJobRequest) Reset() {
+	*x = WorkerCancelJobRequest{}
+	mi := &file_api_proto_worker_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerCancelJobRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerCancelJobRequest) ProtoMessage() {}
+
+func (x *WorkerCancelJobRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_worker_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerCancelJobRequest.ProtoReflect.Descriptor instead.
+func (*WorkerCancelJobRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_worker_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *WorkerCancelJobRequest) GetWorkerId() string {
+	if x != nil {
+		return x.WorkerId
+	}
+	return ""
+}
+
+func (x *WorkerCancelJobRequest) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *WorkerCancelJobRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type WorkerCancelJobResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cancelled     bool                   `protobuf:"varint,1,opt,name=cancelled,proto3" json:"cancelled,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerCancelJobResponse) Reset() {
+	*x = WorkerCancelJobResponse{}
+	mi := &file_api_proto_worker_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerCancelJobResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerCancelJobResponse) ProtoMessage() {}
+
+func (x *WorkerCancelJobResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_worker_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerCancelJobResponse.ProtoReflect.Descriptor instead.
+func (*WorkerCancelJobResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_worker_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *WorkerCancelJobResponse) GetCancelled() bool {
+	if x != nil {
+		return x.Cancelled
+	}
+	return false
+}
+
+func (x *WorkerCancelJobResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_api_proto_worker_proto protoreflect.FileDescriptor
 
 const file_api_proto_worker_proto_rawDesc = "" +
@@ -138,9 +251,17 @@ const file_api_proto_worker_proto_rawDesc = "" +
 	".proto.JobR\x03job\"I\n" +
 	"\x11AssignJobResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage2O\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"d\n" +
+	"\x16WorkerCancelJobRequest\x12\x1b\n" +
+	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x15\n" +
+	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"Q\n" +
+	"\x17WorkerCancelJobResponse\x12\x1c\n" +
+	"\tcancelled\x18\x01 \x01(\bR\tcancelled\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\x9b\x01\n" +
 	"\rWorkerService\x12>\n" +
-	"\tAssignJob\x12\x17.proto.AssignJobRequest\x1a\x18.proto.AssignJobResponseB1Z/github.com/francisco3ferraz/conductor/api/protob\x06proto3"
+	"\tAssignJob\x12\x17.proto.AssignJobRequest\x1a\x18.proto.AssignJobResponse\x12J\n" +
+	"\tCancelJob\x12\x1d.proto.WorkerCancelJobRequest\x1a\x1e.proto.WorkerCancelJobResponseB1Z/github.com/francisco3ferraz/conductor/api/protob\x06proto3"
 
 var (
 	file_api_proto_worker_proto_rawDescOnce sync.Once
@@ -154,18 +275,22 @@ func file_api_proto_worker_proto_rawDescGZIP() []byte {
 	return file_api_proto_worker_proto_rawDescData
 }
 
-var file_api_proto_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_api_proto_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_api_proto_worker_proto_goTypes = []any{
-	(*AssignJobRequest)(nil),  // 0: proto.AssignJobRequest
-	(*AssignJobResponse)(nil), // 1: proto.AssignJobResponse
-	(*Job)(nil),               // 2: proto.Job
+	(*AssignJobRequest)(nil),        // 0: proto.AssignJobRequest
+	(*AssignJobResponse)(nil),       // 1: proto.AssignJobResponse
+	(*WorkerCancelJobRequest)(nil),  // 2: proto.WorkerCancelJobRequest
+	(*WorkerCancelJobResponse)(nil), // 3: proto.WorkerCancelJobResponse
+	(*Job)(nil),                     // 4: proto.Job
 }
 var file_api_proto_worker_proto_depIdxs = []int32{
-	2, // 0: proto.AssignJobRequest.job:type_name -> proto.Job
+	4, // 0: proto.AssignJobRequest.job:type_name -> proto.Job
 	0, // 1: proto.WorkerService.AssignJob:input_type -> proto.AssignJobRequest
-	1, // 2: proto.WorkerService.AssignJob:output_type -> proto.AssignJobResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
+	2, // 2: proto.WorkerService.CancelJob:input_type -> proto.WorkerCancelJobRequest
+	1, // 3: proto.WorkerService.AssignJob:output_type -> proto.AssignJobResponse
+	3, // 4: proto.WorkerService.CancelJob:output_type -> proto.WorkerCancelJobResponse
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -183,7 +308,7 @@ func file_api_proto_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_worker_proto_rawDesc), len(file_api_proto_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

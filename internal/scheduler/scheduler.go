@@ -140,7 +140,24 @@ func (s *Scheduler) checkJobTimeouts(ctx context.Context) {
 				zap.Duration("elapsed", time.Since(j.StartedAt)),
 			)
 
-			// Fail the job due to timeout
+			// Cancel job on worker BEFORE failing in Raft
+			if j.AssignedTo != "" {
+				if err := s.cancelJobOnWorker(ctx, j.ID, j.AssignedTo, "timeout"); err != nil {
+					s.logger.Error("Failed to cancel job on worker",
+						zap.String("job_id", j.ID),
+						zap.String("worker_id", j.AssignedTo),
+						zap.Error(err),
+					)
+					// Continue anyway - worker might be dead
+				} else {
+					s.logger.Info("Successfully cancelled job on worker",
+						zap.String("job_id", j.ID),
+						zap.String("worker_id", j.AssignedTo),
+					)
+				}
+			}
+
+			// Then fail the job in Raft FSM
 			timeoutErr := fmt.Sprintf("job timed out after %v", j.TimeoutDuration())
 			if err := s.applier.FailJob(j.ID, timeoutErr); err != nil {
 				s.logger.Error("Failed to timeout job",
@@ -262,8 +279,34 @@ func (s *Scheduler) schedulePendingJobs(ctx context.Context) {
 	}
 }
 
-// RegisterWorker registers a new worker
-func (s *Scheduler) RegisterWorker(id, address string, maxJobs int) {
+const (
+	// MinWorkerCapacity is the minimum allowed concurrent jobs per worker
+	MinWorkerCapacity = 1
+	// MaxWorkerCapacity is the maximum allowed concurrent jobs per worker
+	MaxWorkerCapacity = 1000
+)
+
+// RegisterWorker registers a new worker with validation
+func (s *Scheduler) RegisterWorker(id, address string, maxJobs int) error {
+	// Validate worker capacity
+	if maxJobs < MinWorkerCapacity {
+		s.logger.Error("Worker capacity too low",
+			zap.String("worker_id", id),
+			zap.Int("max_jobs", maxJobs),
+			zap.Int("minimum", MinWorkerCapacity),
+		)
+		return fmt.Errorf("worker capacity %d is below minimum %d", maxJobs, MinWorkerCapacity)
+	}
+
+	if maxJobs > MaxWorkerCapacity {
+		s.logger.Error("Worker capacity too high",
+			zap.String("worker_id", id),
+			zap.Int("max_jobs", maxJobs),
+			zap.Int("maximum", MaxWorkerCapacity),
+		)
+		return fmt.Errorf("worker capacity %d exceeds maximum %d", maxJobs, MaxWorkerCapacity)
+	}
+
 	// Register in local registry
 	s.registry.Register(id, address, maxJobs)
 
@@ -276,6 +319,7 @@ func (s *Scheduler) RegisterWorker(id, address string, maxJobs int) {
 	}
 	if err := s.applier.RegisterWorker(workerInfo); err != nil {
 		s.logger.Error("Failed to register worker in FSM", zap.Error(err))
+		return err
 	}
 
 	s.logger.Info("Worker registered",
@@ -283,6 +327,13 @@ func (s *Scheduler) RegisterWorker(id, address string, maxJobs int) {
 		zap.String("address", address),
 		zap.Int("max_jobs", maxJobs),
 	)
+
+	return nil
+}
+
+// CancelJobOnWorker cancels a running job on a worker (exposed for master server)
+func (s *Scheduler) CancelJobOnWorker(ctx context.Context, jobID, workerID, reason string) error {
+	return s.cancelJobOnWorker(ctx, jobID, workerID, reason)
 }
 
 // UpdateHeartbeat updates worker's last heartbeat time

@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"fmt"
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/config"
@@ -10,24 +11,29 @@ import (
 	"go.uber.org/zap"
 )
 
+// ResultReporter defines the interface for reporting job results
+type ResultReporter interface {
+	ReportResult(ctx context.Context, jobID string, result *job.Result) error
+}
+
 // WorkerServer implements the gRPC WorkerService
 type WorkerServer struct {
 	proto.UnimplementedWorkerServiceServer
-	workerID       string
-	executor       *worker.Executor
-	resultReporter func(context.Context, string, *job.Result) error
-	logger         *zap.Logger
-	cfg            *config.Config
+	workerID string
+	executor *worker.Executor
+	reporter ResultReporter
+	logger   *zap.Logger
+	cfg      *config.Config
 }
 
 // NewWorkerServer creates a new worker gRPC server
-func NewWorkerServer(workerID string, exec *worker.Executor, resultReporter func(context.Context, string, *job.Result) error, cfg *config.Config, logger *zap.Logger) *WorkerServer {
+func NewWorkerServer(workerID string, exec *worker.Executor, reporter ResultReporter, cfg *config.Config, logger *zap.Logger) *WorkerServer {
 	return &WorkerServer{
-		workerID:       workerID,
-		executor:       exec,
-		resultReporter: resultReporter,
-		logger:         logger,
-		cfg:            cfg,
+		workerID: workerID,
+		executor: exec,
+		reporter: reporter,
+		logger:   logger,
+		cfg:      cfg,
 	}
 }
 
@@ -50,10 +56,10 @@ func (w *WorkerServer) AssignJob(ctx context.Context, req *proto.AssignJobReques
 		result := w.executor.Execute(jobCtx, j)
 
 		// Report result back to master with timeout
-		if w.resultReporter != nil {
+		if w.reporter != nil {
 			reportCtx, cancel := context.WithTimeout(context.Background(), w.cfg.Worker.ResultTimeout)
 			defer cancel()
-			if err := w.resultReporter(reportCtx, j.ID, result); err != nil {
+			if err := w.reporter.ReportResult(reportCtx, j.ID, result); err != nil {
 				w.logger.Error("Failed to report job result",
 					zap.String("job_id", j.ID),
 					zap.Error(err),
@@ -65,6 +71,28 @@ func (w *WorkerServer) AssignJob(ctx context.Context, req *proto.AssignJobReques
 	return &proto.AssignJobResponse{
 		Accepted: true,
 		Message:  "Job accepted for execution",
+	}, nil
+}
+
+// CancelJob cancels a running job on this worker
+func (w *WorkerServer) CancelJob(ctx context.Context, req *proto.WorkerCancelJobRequest) (*proto.WorkerCancelJobResponse, error) {
+	w.logger.Info("Received job cancellation request",
+		zap.String("job_id", req.JobId),
+		zap.String("reason", req.Reason),
+	)
+
+	cancelled := w.executor.Cancel(req.JobId)
+
+	if cancelled {
+		return &proto.WorkerCancelJobResponse{
+			Cancelled: true,
+			Message:   fmt.Sprintf("Job %s cancelled: %s", req.JobId, req.Reason),
+		}, nil
+	}
+
+	return &proto.WorkerCancelJobResponse{
+		Cancelled: false,
+		Message:   fmt.Sprintf("Job %s not found or already completed", req.JobId),
 	}, nil
 }
 

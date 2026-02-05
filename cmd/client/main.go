@@ -11,6 +11,11 @@ import (
 	"github.com/francisco3ferraz/conductor/pkg/client"
 )
 
+const (
+	// MaxPayloadSize is the maximum allowed job payload size (4MB)
+	MaxPayloadSize = 4 * 1024 * 1024
+)
+
 func main() {
 	addr := flag.String("addr", "localhost:9000", "Master server address")
 	action := flag.String("action", "submit", "Action: submit, status, list, cancel")
@@ -24,6 +29,7 @@ func main() {
 	tracingConfig := tracing.DefaultConfig()
 	tracingConfig.ServiceName = "conductor-client"
 	tracingConfig.ServiceVersion = "1.0.0"
+	// Client defaults to insecure for development; override via env vars for production
 
 	ctx := context.Background()
 	tracingShutdown, err := tracing.Initialize(ctx, tracingConfig)
@@ -46,13 +52,19 @@ func main() {
 
 	switch *action {
 	case "submit":
+		// Validate payload size
+		payloadBytes := []byte(*payload)
+		if len(payloadBytes) > MaxPayloadSize {
+			log.Fatalf("Payload exceeds maximum size of %d bytes (4MB). Got %d bytes", MaxPayloadSize, len(payloadBytes))
+		}
+
 		var jobID string
 		var err error
 
 		if *timeoutSeconds > 0 {
-			jobID, err = c.SubmitJobWithTimeout(ctx, *jobType, []byte(*payload), 5, 3, *timeoutSeconds)
+			jobID, err = c.SubmitJobWithTimeout(ctx, *jobType, payloadBytes, 5, 3, *timeoutSeconds)
 		} else {
-			jobID, err = c.SubmitJob(ctx, *jobType, []byte(*payload), 5, 3)
+			jobID, err = c.SubmitJob(ctx, *jobType, payloadBytes, 5, 3)
 		}
 
 		if err != nil {

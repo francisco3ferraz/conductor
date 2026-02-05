@@ -19,17 +19,17 @@ import (
 
 // Scheduler interface for worker management
 type Scheduler interface {
-	RegisterWorker(id, address string, maxJobs int)
+	RegisterWorker(id, address string, maxJobs int) error
 	UpdateHeartbeat(workerID string, activeJobs int)
 	RecordWorkerHeartbeat(workerID string, stats *failover.WorkerStats)
 	GetFailureDetector() *failover.FailureDetector
 	GetRecoveryManager() *failover.RecoveryManager
+	CancelJobOnWorker(ctx context.Context, jobID, workerID, reason string) error
 }
 
-// MasterServer implements the gRPC MasterService and WorkerService
+// MasterServer implements the gRPC MasterService
 type MasterServer struct {
 	proto.UnimplementedMasterServiceServer
-	proto.UnimplementedWorkerServiceServer
 	raftNode  *consensus.RaftNode
 	fsm       *consensus.FSM
 	applier   *consensus.ApplyCommand
@@ -272,6 +272,18 @@ func (s *MasterServer) CancelJob(ctx context.Context, req *proto.CancelJobReques
 
 	s.logger.Info("Cancelling job via gRPC", zap.String("job_id", req.JobId))
 
+	// Cancel job on worker if it's assigned
+	if j.AssignedTo != "" && (j.Status == job.StatusAssigned || j.Status == job.StatusRunning) {
+		if err := s.scheduler.CancelJobOnWorker(ctx, j.ID, j.AssignedTo, "user_cancelled"); err != nil {
+			s.logger.Warn("Failed to cancel job on worker (will still mark as failed)",
+				zap.String("job_id", j.ID),
+				zap.String("worker_id", j.AssignedTo),
+				zap.Error(err),
+			)
+			// Continue anyway - we'll mark it as failed in Raft
+		}
+	}
+
 	// Mark as failed with cancellation message
 	if err := s.applier.FailJob(j.ID, "cancelled by user"); err != nil {
 		return &proto.CancelJobResponse{
@@ -338,7 +350,16 @@ func (s *MasterServer) RegisterWorker(ctx context.Context, req *proto.RegisterWo
 
 	// Register worker with scheduler (includes failover detector registration)
 	if s.scheduler != nil {
-		s.scheduler.RegisterWorker(req.WorkerId, req.Address, int(req.MaxConcurrentJobs))
+		if err := s.scheduler.RegisterWorker(req.WorkerId, req.Address, int(req.MaxConcurrentJobs)); err != nil {
+			s.logger.Error("Failed to register worker",
+				zap.String("worker_id", req.WorkerId),
+				zap.Error(err),
+			)
+			return &proto.RegisterWorkerResponse{
+				Success: false,
+				Message: fmt.Sprintf("Failed to register worker: %v", err),
+			}, nil
+		}
 
 		// Also register directly with failure detector
 		if failureDetector := s.scheduler.GetFailureDetector(); failureDetector != nil {

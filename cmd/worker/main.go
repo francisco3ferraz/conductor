@@ -22,6 +22,47 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// MasterResultReporter implements rpc.ResultReporter interface
+type MasterResultReporter struct {
+	client   proto.MasterServiceClient
+	workerID string
+	logger   *zap.Logger
+}
+
+// ReportResult sends job result to the master
+func (r *MasterResultReporter) ReportResult(ctx context.Context, jobID string, result *job.Result) error {
+	r.logger.Info("Job execution completed",
+		zap.String("job_id", jobID),
+		zap.Bool("success", result.Success),
+		zap.Int64("duration_ms", result.DurationMs),
+	)
+
+	// Report result to master via gRPC
+	reportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	resp, err := r.client.ReportResult(reportCtx, &proto.ReportResultRequest{
+		JobId:    jobID,
+		WorkerId: r.workerID,
+		Result: &proto.JobResult{
+			Success:    result.Success,
+			Output:     result.Output,
+			Error:      result.Error,
+			DurationMs: result.DurationMs,
+		},
+	})
+	if err != nil {
+		r.logger.Error("Failed to report result", zap.Error(err))
+		return err
+	}
+
+	if !resp.Success {
+		r.logger.Warn("Result report not acknowledged", zap.String("message", resp.Message))
+	}
+
+	return nil
+}
+
 func main() {
 	// Load configuration
 	cfg, err := config.Load("")
@@ -42,6 +83,14 @@ func main() {
 	tracingConfig := tracing.DefaultConfig()
 	tracingConfig.ServiceName = "conductor-worker"
 	tracingConfig.ServiceVersion = "1.0.0"
+	tracingConfig.Environment = string(cfg.Profile)
+
+	// Match tracing security to profile
+	if cfg.Profile == config.ProfileProduction || cfg.Profile == config.ProfileStaging {
+		tracingConfig.Insecure = false
+	} else {
+		tracingConfig.Insecure = true
+	}
 
 	ctx := context.Background()
 	tracingShutdown, err := tracing.Initialize(ctx, tracingConfig)
@@ -53,6 +102,7 @@ func main() {
 		logger.Info("Distributed tracing initialized",
 			zap.String("service", tracingConfig.ServiceName),
 			zap.String("endpoint", tracingConfig.OTLPEndpoint),
+			zap.Bool("secure", !tracingConfig.Insecure),
 		)
 	}
 
@@ -106,38 +156,11 @@ func main() {
 	}
 	defer mgr.Stop()
 
-	// Create result reporter function that sends results back to master
-	resultReporter := func(ctx context.Context, jobID string, result *job.Result) error {
-		logger.Info("Job execution completed",
-			zap.String("job_id", jobID),
-			zap.Bool("success", result.Success),
-			zap.Int64("duration_ms", result.DurationMs),
-		)
-
-		// Report result to master via gRPC
-		reportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-
-		resp, err := workerClient.Client.ReportResult(reportCtx, &proto.ReportResultRequest{
-			JobId:    jobID,
-			WorkerId: cfg.Worker.WorkerID,
-			Result: &proto.JobResult{
-				Success:    result.Success,
-				Output:     result.Output,
-				Error:      result.Error,
-				DurationMs: result.DurationMs,
-			},
-		})
-		if err != nil {
-			logger.Error("Failed to report result", zap.Error(err))
-			return err
-		}
-
-		if !resp.Success {
-			logger.Warn("Result report not acknowledged", zap.String("message", resp.Message))
-		}
-
-		return nil
+	// Create result reporter that sends results back to master
+	resultReporter := &MasterResultReporter{
+		client:   workerClient.Client,
+		workerID: cfg.Worker.WorkerID,
+		logger:   logger,
 	}
 
 	// Create gRPC server with interceptors
