@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -19,7 +20,11 @@ type AuthManager struct {
 	config       *JWTConfig
 	logger       *zap.Logger
 	auditLogger  *zap.Logger
+	mu           sync.RWMutex
 	refreshCache map[string]*RefreshToken // userID -> refresh token
+	ctx          context.Context
+	cancel       context.CancelFunc
+	cleanupDone  chan struct{}
 }
 
 // JWTConfig holds JWT configuration
@@ -54,11 +59,53 @@ func NewAuthManager(config *JWTConfig, logger *zap.Logger) *AuthManager {
 		config.RefreshTokenTTL = 7 * 24 * time.Hour
 	}
 
-	return &AuthManager{
+	ctx, cancel := context.WithCancel(context.Background())
+
+	am := &AuthManager{
 		config:       config,
 		logger:       logger,
 		auditLogger:  auditLogger,
 		refreshCache: make(map[string]*RefreshToken),
+		ctx:          ctx,
+		cancel:       cancel,
+		cleanupDone:  make(chan struct{}),
+	}
+
+	// Start periodic cleanup of expired tokens
+	go am.cleanupExpiredTokens()
+
+	return am
+}
+
+// cleanupExpiredTokens periodically removes expired refresh tokens to prevent memory leak
+func (am *AuthManager) cleanupExpiredTokens() {
+	ticker := time.NewTicker(10 * time.Minute) // Check every 10 minutes
+	defer ticker.Stop()
+	defer close(am.cleanupDone)
+
+	for {
+		select {
+		case <-am.ctx.Done():
+			return
+		case <-ticker.C:
+			am.mu.Lock()
+			now := time.Now()
+			removed := 0
+			for userID, token := range am.refreshCache {
+				if now.After(token.ExpiresAt) {
+					delete(am.refreshCache, userID)
+					removed++
+				}
+			}
+			am.mu.Unlock()
+
+			if removed > 0 {
+				am.logger.Debug("Cleaned up expired refresh tokens",
+					zap.Int("removed", removed),
+					zap.Int("remaining", len(am.refreshCache)),
+				)
+			}
+		}
 	}
 }
 
@@ -113,13 +160,15 @@ func (am *AuthManager) GenerateTokenPair(userID string, roles []string) (accessT
 		return "", "", fmt.Errorf("failed to sign refresh token: %w", err)
 	}
 
-	// Store refresh token
+	// Store refresh token with mutex protection
+	am.mu.Lock()
 	am.refreshCache[userID] = &RefreshToken{
 		Token:     refreshToken,
 		UserID:    userID,
 		ExpiresAt: now.Add(am.config.RefreshTokenTTL),
 		CreatedAt: now,
 	}
+	am.mu.Unlock()
 
 	am.auditLogger.Info("Generated token pair",
 		zap.String("user_id", userID),
@@ -162,8 +211,11 @@ func (am *AuthManager) RefreshAccessToken(refreshToken string) (string, error) {
 		return "", fmt.Errorf("missing user ID in refresh token")
 	}
 
-	// Verify refresh token exists in cache
+	// Verify refresh token exists in cache with mutex protection
+	am.mu.RLock()
 	cachedToken, ok := am.refreshCache[userID]
+	am.mu.RUnlock()
+
 	if !ok || cachedToken.Token != refreshToken {
 		am.auditLogger.Warn("Refresh token not found or mismatch",
 			zap.String("user_id", userID))
@@ -172,7 +224,9 @@ func (am *AuthManager) RefreshAccessToken(refreshToken string) (string, error) {
 
 	// Check expiry
 	if time.Now().After(cachedToken.ExpiresAt) {
+		am.mu.Lock()
 		delete(am.refreshCache, userID)
+		am.mu.Unlock()
 		am.auditLogger.Warn("Refresh token expired", zap.String("user_id", userID))
 		return "", fmt.Errorf("refresh token expired")
 	}
@@ -196,7 +250,9 @@ func (am *AuthManager) RefreshAccessToken(refreshToken string) (string, error) {
 
 // RevokeRefreshToken revokes a user's refresh token
 func (am *AuthManager) RevokeRefreshToken(userID string) {
+	am.mu.Lock()
 	delete(am.refreshCache, userID)
+	am.mu.Unlock()
 	am.auditLogger.Info("Revoked refresh token", zap.String("user_id", userID))
 }
 
@@ -344,4 +400,23 @@ func (am *AuthManager) AuthInterceptor() grpc.UnaryServerInterceptor {
 
 		return handler(ctx, req)
 	}
+}
+
+// Shutdown gracefully shuts down the auth manager and stops cleanup goroutine
+func (am *AuthManager) Shutdown() error {
+	am.logger.Info("Shutting down auth manager")
+
+	// Cancel context to stop cleanup goroutine
+	am.cancel()
+
+	// Wait for cleanup goroutine to finish
+	<-am.cleanupDone
+
+	// Clear refresh cache
+	am.mu.Lock()
+	am.refreshCache = make(map[string]*RefreshToken)
+	am.mu.Unlock()
+
+	am.logger.Info("Auth manager shutdown complete")
+	return nil
 }
