@@ -130,6 +130,73 @@ func (a *ApplyCommand) FailJob(jobID, errorMsg string) error {
 	return a.raft.Apply(cmdBytes, 10*time.Second)
 }
 
+// RetryJob resets a job for retry after worker failure
+func (a *ApplyCommand) RetryJob(jobID string) error {
+	payload, err := json.Marshal(RetryJobPayload{
+		JobID: jobID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	cmd := Command{
+		Type:    CommandRetryJob,
+		Payload: payload,
+	}
+
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal command: %w", err)
+	}
+
+	return a.raft.Apply(cmdBytes, 10*time.Second)
+}
+
+// MoveToDLQ moves a job to the dead letter queue
+func (a *ApplyCommand) MoveToDLQ(jobID, reason string) error {
+	payload, err := json.Marshal(MoveToDLQPayload{
+		JobID:  jobID,
+		Reason: reason,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	cmd := Command{
+		Type:    CommandMoveToDLQ,
+		Payload: payload,
+	}
+
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal command: %w", err)
+	}
+
+	return a.raft.Apply(cmdBytes, 10*time.Second)
+}
+
+// RetryFromDLQ retries a job from the dead letter queue
+func (a *ApplyCommand) RetryFromDLQ(jobID string) error {
+	payload, err := json.Marshal(RetryFromDLQPayload{
+		JobID: jobID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	cmd := Command{
+		Type:    CommandRetryFromDLQ,
+		Payload: payload,
+	}
+
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal command: %w", err)
+	}
+
+	return a.raft.Apply(cmdBytes, 10*time.Second)
+}
+
 // RegisterWorker registers a new worker
 func (a *ApplyCommand) RegisterWorker(worker *storage.WorkerInfo) error {
 	payload, err := json.Marshal(RegisterWorkerPayload{Worker: worker})

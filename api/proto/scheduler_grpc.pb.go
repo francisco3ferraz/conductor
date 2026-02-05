@@ -27,6 +27,8 @@ const (
 	MasterService_RegisterWorker_FullMethodName = "/proto.MasterService/RegisterWorker"
 	MasterService_Heartbeat_FullMethodName      = "/proto.MasterService/Heartbeat"
 	MasterService_ReportResult_FullMethodName   = "/proto.MasterService/ReportResult"
+	MasterService_ListDLQ_FullMethodName        = "/proto.MasterService/ListDLQ"
+	MasterService_RetryFromDLQ_FullMethodName   = "/proto.MasterService/RetryFromDLQ"
 )
 
 // MasterServiceClient is the client API for MasterService service.
@@ -44,6 +46,9 @@ type MasterServiceClient interface {
 	RegisterWorker(ctx context.Context, in *RegisterWorkerRequest, opts ...grpc.CallOption) (*RegisterWorkerResponse, error)
 	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
 	ReportResult(ctx context.Context, in *ReportResultRequest, opts ...grpc.CallOption) (*ReportResultResponse, error)
+	// Dead Letter Queue operations
+	ListDLQ(ctx context.Context, in *ListDLQRequest, opts ...grpc.CallOption) (*ListDLQResponse, error)
+	RetryFromDLQ(ctx context.Context, in *RetryFromDLQRequest, opts ...grpc.CallOption) (*RetryFromDLQResponse, error)
 }
 
 type masterServiceClient struct {
@@ -134,6 +139,26 @@ func (c *masterServiceClient) ReportResult(ctx context.Context, in *ReportResult
 	return out, nil
 }
 
+func (c *masterServiceClient) ListDLQ(ctx context.Context, in *ListDLQRequest, opts ...grpc.CallOption) (*ListDLQResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDLQResponse)
+	err := c.cc.Invoke(ctx, MasterService_ListDLQ_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *masterServiceClient) RetryFromDLQ(ctx context.Context, in *RetryFromDLQRequest, opts ...grpc.CallOption) (*RetryFromDLQResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RetryFromDLQResponse)
+	err := c.cc.Invoke(ctx, MasterService_RetryFromDLQ_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MasterServiceServer is the server API for MasterService service.
 // All implementations must embed UnimplementedMasterServiceServer
 // for forward compatibility.
@@ -149,6 +174,9 @@ type MasterServiceServer interface {
 	RegisterWorker(context.Context, *RegisterWorkerRequest) (*RegisterWorkerResponse, error)
 	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
 	ReportResult(context.Context, *ReportResultRequest) (*ReportResultResponse, error)
+	// Dead Letter Queue operations
+	ListDLQ(context.Context, *ListDLQRequest) (*ListDLQResponse, error)
+	RetryFromDLQ(context.Context, *RetryFromDLQRequest) (*RetryFromDLQResponse, error)
 	mustEmbedUnimplementedMasterServiceServer()
 }
 
@@ -182,6 +210,12 @@ func (UnimplementedMasterServiceServer) Heartbeat(context.Context, *HeartbeatReq
 }
 func (UnimplementedMasterServiceServer) ReportResult(context.Context, *ReportResultRequest) (*ReportResultResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportResult not implemented")
+}
+func (UnimplementedMasterServiceServer) ListDLQ(context.Context, *ListDLQRequest) (*ListDLQResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDLQ not implemented")
+}
+func (UnimplementedMasterServiceServer) RetryFromDLQ(context.Context, *RetryFromDLQRequest) (*RetryFromDLQResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RetryFromDLQ not implemented")
 }
 func (UnimplementedMasterServiceServer) mustEmbedUnimplementedMasterServiceServer() {}
 func (UnimplementedMasterServiceServer) testEmbeddedByValue()                       {}
@@ -348,6 +382,42 @@ func _MasterService_ReportResult_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MasterService_ListDLQ_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDLQRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MasterServiceServer).ListDLQ(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MasterService_ListDLQ_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MasterServiceServer).ListDLQ(ctx, req.(*ListDLQRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MasterService_RetryFromDLQ_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RetryFromDLQRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MasterServiceServer).RetryFromDLQ(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MasterService_RetryFromDLQ_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MasterServiceServer).RetryFromDLQ(ctx, req.(*RetryFromDLQRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MasterService_ServiceDesc is the grpc.ServiceDesc for MasterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -386,6 +456,14 @@ var MasterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReportResult",
 			Handler:    _MasterService_ReportResult_Handler,
+		},
+		{
+			MethodName: "ListDLQ",
+			Handler:    _MasterService_ListDLQ_Handler,
+		},
+		{
+			MethodName: "RetryFromDLQ",
+			Handler:    _MasterService_RetryFromDLQ_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

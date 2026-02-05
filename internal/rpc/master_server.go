@@ -487,3 +487,111 @@ func (s *MasterServer) Shutdown() error {
 	s.logger.Info("Master server shutdown complete")
 	return nil
 }
+
+// jobToProto converts a job.Job to proto.Job
+func (s *MasterServer) jobToProto(j *job.Job) *proto.Job {
+	pbJob := &proto.Job{
+		Id:           j.ID,
+		Type:         j.Type.String(),
+		Payload:      j.Payload,
+		Priority:     int32(j.Priority),
+		Status:       j.Status.String(),
+		AssignedTo:   j.AssignedTo,
+		CreatedAt:    timestamppb.New(j.CreatedAt),
+		RetryCount:   int32(j.RetryCount),
+		MaxRetries:   int32(j.MaxRetries),
+		ErrorMessage: j.ErrorMessage,
+	}
+
+	if !j.StartedAt.IsZero() {
+		pbJob.StartedAt = timestamppb.New(j.StartedAt)
+	}
+	if !j.CompletedAt.IsZero() {
+		pbJob.CompletedAt = timestamppb.New(j.CompletedAt)
+	}
+
+	return pbJob
+}
+
+// ListDLQ returns all jobs in the dead letter queue
+func (s *MasterServer) ListDLQ(ctx context.Context, req *proto.ListDLQRequest) (*proto.ListDLQResponse, error) {
+	s.logger.Info("Listing dead letter queue jobs",
+		zap.Int32("limit", req.Limit),
+		zap.Int32("offset", req.Offset))
+
+	// Read from FSM (no Raft consensus needed for reads)
+	dlqJobs := s.fsm.ListDLQJobs()
+
+	// Apply pagination
+	offset := int(req.GetOffset())
+	limit := int(req.GetLimit())
+	if limit == 0 {
+		limit = 100 // Default limit
+	}
+
+	total := len(dlqJobs)
+	start := offset
+	if start >= total {
+		return &proto.ListDLQResponse{
+			Jobs:  []*proto.Job{},
+			Total: int32(total),
+		}, nil
+	}
+
+	end := start + limit
+	if end > total {
+		end = total
+	}
+
+	// Convert jobs to proto format
+	protoJobs := make([]*proto.Job, 0, end-start)
+	for i := start; i < end; i++ {
+		protoJobs = append(protoJobs, s.jobToProto(dlqJobs[i]))
+	}
+
+	return &proto.ListDLQResponse{
+		Jobs:  protoJobs,
+		Total: int32(total),
+	}, nil
+}
+
+// RetryFromDLQ retries a job from the dead letter queue
+func (s *MasterServer) RetryFromDLQ(ctx context.Context, req *proto.RetryFromDLQRequest) (*proto.RetryFromDLQResponse, error) {
+	// Check if we're the leader
+	if !s.raftNode.IsLeader() {
+		leader := s.raftNode.Leader()
+		s.logger.Warn("Not leader, cannot retry DLQ job",
+			zap.String("job_id", req.JobId),
+			zap.String("leader", leader))
+		return &proto.RetryFromDLQResponse{
+			Success: false,
+			Message: fmt.Sprintf("Not leader. Current leader: %s", leader),
+		}, nil
+	}
+
+	s.logger.Info("Retrying job from dead letter queue", zap.String("job_id", req.JobId))
+
+	// Verify job exists in DLQ
+	if _, err := s.fsm.GetDLQJob(req.JobId); err != nil {
+		return &proto.RetryFromDLQResponse{
+			Success: false,
+			Message: fmt.Sprintf("Job not found in DLQ: %v", err),
+		}, nil
+	}
+
+	// Retry via Raft command
+	if err := s.applier.RetryFromDLQ(req.JobId); err != nil {
+		s.logger.Error("Failed to retry job from DLQ",
+			zap.String("job_id", req.JobId),
+			zap.Error(err))
+		return &proto.RetryFromDLQResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to retry: %v", err),
+		}, nil
+	}
+
+	return &proto.RetryFromDLQResponse{
+		Success: true,
+		Message: "Job successfully retried from DLQ",
+	}, nil
+}

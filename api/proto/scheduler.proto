@@ -18,6 +18,10 @@ service MasterService {
   rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
+
+  // Dead Letter Queue operations
+  rpc ListDLQ(ListDLQRequest) returns (ListDLQResponse);
+  rpc RetryFromDLQ(RetryFromDLQRequest) returns (RetryFromDLQResponse);
 }
 
 // Job submission request
@@ -141,6 +145,26 @@ message ReportResultRequest {
 }
 
 message ReportResultResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Dead Letter Queue operations
+message ListDLQRequest {
+  int32 limit = 1;   // Maximum number of jobs to return
+  int32 offset = 2;  // Pagination offset
+}
+
+message ListDLQResponse {
+  repeated Job jobs = 1;
+  int32 total = 2;
+}
+
+message RetryFromDLQRequest {
+  string job_id = 1;
+}
+
+message RetryFromDLQResponse {
   bool success = 1;
   string message = 2;
 }

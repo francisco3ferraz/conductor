@@ -406,6 +406,7 @@ func (s *Scheduler) SetJobStore(jobStore storage.Store) {
 			s,             // Pass scheduler reference
 			jobStore,      // Job storage
 			s.fsm,         // FSM for job state management
+			s.applier,     // ApplyCommand for DLQ operations
 			3,             // Max retries
 			5*time.Second, // Retry delay
 			s.logger,

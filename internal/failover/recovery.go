@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"go.uber.org/zap"
@@ -22,6 +23,7 @@ type RecoveryManager struct {
 	scheduler     SchedulerInterface
 	jobStore      storage.Store
 	fsm           JobStateMachine
+	applyCmd      *consensus.ApplyCommand
 	logger        *zap.Logger
 	mu            sync.RWMutex
 	recoveryQueue chan string // Worker IDs that need recovery
@@ -38,6 +40,8 @@ type JobStateMachine interface {
 	ListJobs() []*job.Job
 	AssignJob(jobID, workerID string) error
 	FailJob(jobID, errorMsg string) error
+	ListDLQJobs() []*job.Job
+	GetDLQJob(id string) (*job.Job, error)
 }
 
 // RecoveryStats tracks recovery operation statistics
@@ -57,6 +61,7 @@ func NewRecoveryManager(
 	scheduler SchedulerInterface,
 	jobStore storage.Store,
 	fsm JobStateMachine,
+	applyCmd *consensus.ApplyCommand,
 	maxRetries int,
 	retryDelay time.Duration,
 	logger *zap.Logger,
@@ -67,6 +72,7 @@ func NewRecoveryManager(
 		scheduler:     scheduler,
 		jobStore:      jobStore,
 		fsm:           fsm,
+		applyCmd:      applyCmd,
 		logger:        logger,
 		recoveryQueue: make(chan string, 100), // Buffer for worker failures
 		maxRetries:    maxRetries,
@@ -190,15 +196,34 @@ func (rm *RecoveryManager) recoverWorkerJobs(workerID string) error {
 func (rm *RecoveryManager) recoverJob(j *job.Job) error {
 	// Check if we should retry or fail the job
 	if j.RetryCount >= rm.maxRetries {
-		rm.logger.Error("Job exceeded max retries, permanently failing",
+		rm.logger.Warn("Job exceeded max retries, moving to dead letter queue",
 			zap.String("job_id", j.ID),
 			zap.String("job_type", j.Type.String()),
 			zap.Int("retry_count", j.RetryCount),
 			zap.Int("max_retries", rm.maxRetries),
 		)
 
+		// First fail the job
 		errMsg := fmt.Sprintf("Permanent failure: worker failures exceeded max retries (%d/%d)", j.RetryCount, rm.maxRetries)
-		return rm.fsm.FailJob(j.ID, errMsg)
+		if err := rm.fsm.FailJob(j.ID, errMsg); err != nil {
+			return fmt.Errorf("failed to mark job as failed: %w", err)
+		}
+
+		// Then move to DLQ via Raft command
+		reason := fmt.Sprintf("max_retries_exceeded: %d/%d attempts", j.RetryCount, rm.maxRetries)
+		if err := rm.applyCmd.MoveToDLQ(j.ID, reason); err != nil {
+			rm.logger.Error("Failed to move job to DLQ",
+				zap.String("job_id", j.ID),
+				zap.Error(err))
+			// Don't fail the recovery operation if DLQ move fails
+			// The job is already marked as failed
+		} else {
+			rm.logger.Info("Job moved to dead letter queue",
+				zap.String("job_id", j.ID),
+				zap.String("reason", reason))
+		}
+
+		return nil
 	}
 
 	// Reset job for reassignment
@@ -238,20 +263,16 @@ func (rm *RecoveryManager) recoverJob(j *job.Job) error {
 	return nil
 }
 
-// resetJobForReassignment resets a job's state so it can be reassigned
+// resetJobForReassignment resets a job's state so it can be reassigned via Raft
 func (rm *RecoveryManager) resetJobForReassignment(j *job.Job) error {
-	// This would typically interact with the FSM to reset job state
-	// For now, we'll simulate this by updating the job directly
-	j.Status = job.StatusPending
-	j.AssignedTo = ""
-	j.RetryCount++
-	j.StartedAt = time.Time{}
-	j.ErrorMessage = ""
-
-	// Save the updated job state
-	if err := rm.jobStore.SaveJob(j); err != nil {
-		return fmt.Errorf("failed to save job state: %w", err)
+	// Use Raft command to ensure distributed consistency
+	if err := rm.applyCmd.RetryJob(j.ID); err != nil {
+		return fmt.Errorf("failed to apply retry command: %w", err)
 	}
+
+	rm.logger.Debug("Job reset for reassignment via Raft",
+		zap.String("job_id", j.ID),
+		zap.Int("new_retry_count", j.RetryCount+1))
 
 	return nil
 }

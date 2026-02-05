@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/storage"
@@ -19,10 +20,11 @@ import (
 // FSM implements the Raft finite state machine
 // It maintains the replicated state for jobs and workers
 type FSM struct {
-	mu      sync.RWMutex
-	jobs    map[string]*job.Job
-	workers map[string]*storage.WorkerInfo
-	logger  *zap.Logger
+	mu              sync.RWMutex
+	jobs            map[string]*job.Job
+	workers         map[string]*storage.WorkerInfo
+	deadLetterQueue map[string]*job.Job // Jobs that exhausted retries
+	logger          *zap.Logger
 }
 
 // Command types for state machine operations
@@ -32,6 +34,9 @@ const (
 	CommandUnassignJob    = "unassign_job"
 	CommandCompleteJob    = "complete_job"
 	CommandFailJob        = "fail_job"
+	CommandRetryJob       = "retry_job"
+	CommandMoveToDLQ      = "move_to_dlq"
+	CommandRetryFromDLQ   = "retry_from_dlq"
 	CommandRegisterWorker = "register_worker"
 	CommandRemoveWorker   = "remove_worker"
 )
@@ -70,6 +75,22 @@ type FailJobPayload struct {
 	Error string `json:"error"`
 }
 
+// RetryJobPayload is the payload for retrying a job after worker failure
+type RetryJobPayload struct {
+	JobID string `json:"job_id"`
+}
+
+// MoveToDLQPayload is the payload for moving a job to DLQ
+type MoveToDLQPayload struct {
+	JobID  string `json:"job_id"`
+	Reason string `json:"reason"`
+}
+
+// RetryFromDLQPayload is the payload for retrying a job from DLQ
+type RetryFromDLQPayload struct {
+	JobID string `json:"job_id"`
+}
+
 // RegisterWorkerPayload is the payload for registering a worker
 type RegisterWorkerPayload struct {
 	Worker *storage.WorkerInfo `json:"worker"`
@@ -83,9 +104,10 @@ type RemoveWorkerPayload struct {
 // NewFSM creates a new finite state machine
 func NewFSM(logger *zap.Logger) *FSM {
 	return &FSM{
-		jobs:    make(map[string]*job.Job),
-		workers: make(map[string]*storage.WorkerInfo),
-		logger:  logger,
+		jobs:            make(map[string]*job.Job),
+		workers:         make(map[string]*storage.WorkerInfo),
+		deadLetterQueue: make(map[string]*job.Job),
+		logger:          logger,
 	}
 }
 
@@ -130,6 +152,15 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 	case CommandFailJob:
 		span.AddEvent("applying_fail_job")
 		return f.applyFailJob(ctx, cmd.Payload)
+	case CommandRetryJob:
+		span.AddEvent("applying_retry_job")
+		return f.applyRetryJob(ctx, cmd.Payload)
+	case CommandMoveToDLQ:
+		span.AddEvent("applying_move_to_dlq")
+		return f.applyMoveToDLQ(ctx, cmd.Payload)
+	case CommandRetryFromDLQ:
+		span.AddEvent("applying_retry_from_dlq")
+		return f.applyRetryFromDLQ(ctx, cmd.Payload)
 	case CommandRegisterWorker:
 		span.AddEvent("applying_register_worker")
 		return f.applyRegisterWorker(ctx, cmd.Payload)
@@ -230,18 +261,95 @@ func (f *FSM) applyFailJob(ctx context.Context, payload json.RawMessage) interfa
 		return err
 	}
 
-	job, exists := f.jobs[p.JobID]
+	j, exists := f.jobs[p.JobID]
 	if !exists {
 		return fmt.Errorf("job not found: %s", p.JobID)
 	}
 
-	if err := job.Fail(p.Error); err != nil {
+	if err := j.Fail(p.Error); err != nil {
 		return err
 	}
 
+	// Check if job exceeded max retries - if so, it should be moved to DLQ
+	// This is just marking as failed; DLQ move happens via separate command
 	f.logger.Debug("Job failed",
 		zap.String("job_id", p.JobID),
-		zap.String("error", p.Error))
+		zap.String("error", p.Error),
+		zap.Int("retry_count", j.RetryCount),
+		zap.Int("max_retries", j.MaxRetries))
+	return nil
+}
+
+func (f *FSM) applyRetryJob(ctx context.Context, payload json.RawMessage) interface{} {
+	var p RetryJobPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return err
+	}
+
+	j, exists := f.jobs[p.JobID]
+	if !exists {
+		return fmt.Errorf("job not found: %s", p.JobID)
+	}
+
+	// Reset job state for retry
+	j.Status = job.StatusPending
+	j.AssignedTo = ""
+	j.RetryCount++
+	j.StartedAt = time.Time{}
+	j.ErrorMessage = ""
+
+	f.logger.Info("Job reset for retry",
+		zap.String("job_id", p.JobID),
+		zap.Int("retry_count", j.RetryCount),
+		zap.Int("max_retries", j.MaxRetries))
+	return nil
+}
+
+func (f *FSM) applyMoveToDLQ(ctx context.Context, payload json.RawMessage) interface{} {
+	var p MoveToDLQPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return err
+	}
+
+	j, exists := f.jobs[p.JobID]
+	if !exists {
+		return fmt.Errorf("job not found: %s", p.JobID)
+	}
+
+	// Move job to DLQ (keep in jobs map but also add to DLQ for tracking)
+	f.deadLetterQueue[p.JobID] = j
+
+	f.logger.Info("Job moved to dead letter queue",
+		zap.String("job_id", p.JobID),
+		zap.String("reason", p.Reason),
+		zap.Int("retry_count", j.RetryCount),
+		zap.Int("max_retries", j.MaxRetries))
+	return nil
+}
+
+func (f *FSM) applyRetryFromDLQ(ctx context.Context, payload json.RawMessage) interface{} {
+	var p RetryFromDLQPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return err
+	}
+
+	j, exists := f.deadLetterQueue[p.JobID]
+	if !exists {
+		return fmt.Errorf("job not in DLQ: %s", p.JobID)
+	}
+
+	// Remove from DLQ
+	delete(f.deadLetterQueue, p.JobID)
+
+	// Reset job state for retry
+	j.Status = job.StatusPending
+	j.AssignedTo = ""
+	j.ErrorMessage = ""
+	j.Result = nil
+	j.RetryCount = 0 // Reset retry count for manual retry
+
+	f.logger.Info("Job removed from DLQ and reset for retry",
+		zap.String("job_id", p.JobID))
 	return nil
 }
 
@@ -349,4 +457,28 @@ func (f *FSM) ListWorkers() []*storage.WorkerInfo {
 		workers = append(workers, w)
 	}
 	return workers
+}
+
+// ListDLQJobs lists all jobs in the dead letter queue (read-only)
+func (f *FSM) ListDLQJobs() []*job.Job {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	jobs := make([]*job.Job, 0, len(f.deadLetterQueue))
+	for _, j := range f.deadLetterQueue {
+		jobs = append(jobs, j)
+	}
+	return jobs
+}
+
+// GetDLQJob retrieves a job from DLQ by ID (read-only)
+func (f *FSM) GetDLQJob(id string) (*job.Job, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	j, exists := f.deadLetterQueue[id]
+	if !exists {
+		return nil, storage.ErrNotFound
+	}
+	return j, nil
 }

@@ -14,8 +14,9 @@ import (
 
 // FSMSnapshot represents a point-in-time snapshot of the FSM state
 type FSMSnapshot struct {
-	jobs    map[string]*job.Job
-	workers map[string]*storage.WorkerInfo
+	jobs            map[string]*job.Job
+	workers         map[string]*storage.WorkerInfo
+	deadLetterQueue map[string]*job.Job
 }
 
 // Persist writes the snapshot to the given sink with gzip compression
@@ -27,8 +28,9 @@ func (s *FSMSnapshot) Persist(sink raft.SnapshotSink) error {
 
 		// Encode data as JSON
 		data := map[string]interface{}{
-			"jobs":    s.jobs,
-			"workers": s.workers,
+			"jobs":              s.jobs,
+			"workers":           s.workers,
+			"dead_letter_queue": s.deadLetterQueue,
 		}
 
 		// Use JSON encoder for streaming (more memory efficient than Marshal)
@@ -73,9 +75,16 @@ func (f *FSM) CreateSnapshot() (*FSMSnapshot, error) {
 		workers[k] = v
 	}
 
+	// Deep copy DLQ
+	dlq := make(map[string]*job.Job)
+	for k, v := range f.deadLetterQueue {
+		dlq[k] = v
+	}
+
 	return &FSMSnapshot{
-		jobs:    jobs,
-		workers: workers,
+		jobs:            jobs,
+		workers:         workers,
+		deadLetterQueue: dlq,
 	}, nil
 }
 
@@ -90,8 +99,9 @@ func (f *FSM) RestoreFromSnapshot(rc io.ReadCloser) error {
 	}
 
 	var snapshot struct {
-		Jobs    map[string]*job.Job            `json:"jobs"`
-		Workers map[string]*storage.WorkerInfo `json:"workers"`
+		Jobs            map[string]*job.Job            `json:"jobs"`
+		Workers         map[string]*storage.WorkerInfo `json:"workers"`
+		DeadLetterQueue map[string]*job.Job            `json:"dead_letter_queue"`
 	}
 
 	// Try gzip decompression first
@@ -109,10 +119,16 @@ func (f *FSM) RestoreFromSnapshot(rc io.ReadCloser) error {
 
 		f.jobs = snapshot.Jobs
 		f.workers = snapshot.Workers
+		if snapshot.DeadLetterQueue != nil {
+			f.deadLetterQueue = snapshot.DeadLetterQueue
+		} else {
+			f.deadLetterQueue = make(map[string]*job.Job)
+		}
 
 		f.logger.Info("Restored from uncompressed snapshot",
 			zap.Int("jobs", len(f.jobs)),
-			zap.Int("workers", len(f.workers)))
+			zap.Int("workers", len(f.workers)),
+			zap.Int("dlq_jobs", len(f.deadLetterQueue)))
 
 		return nil
 	}
@@ -128,10 +144,16 @@ func (f *FSM) RestoreFromSnapshot(rc io.ReadCloser) error {
 
 	f.jobs = snapshot.Jobs
 	f.workers = snapshot.Workers
+	if snapshot.DeadLetterQueue != nil {
+		f.deadLetterQueue = snapshot.DeadLetterQueue
+	} else {
+		f.deadLetterQueue = make(map[string]*job.Job)
+	}
 
 	f.logger.Info("Restored from compressed snapshot",
 		zap.Int("jobs", len(f.jobs)),
-		zap.Int("workers", len(f.workers)))
+		zap.Int("workers", len(f.workers)),
+		zap.Int("dlq_jobs", len(f.deadLetterQueue)))
 
 	return nil
 }
