@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/metrics"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"github.com/francisco3ferraz/conductor/internal/tracing"
 	"github.com/hashicorp/raft"
@@ -26,6 +27,7 @@ type FSM struct {
 	deadLetterQueue map[string]*job.Job // Jobs that exhausted retries
 	logger          *zap.Logger
 	ctx             context.Context // Parent context for tracing propagation
+	metrics         *metrics.Metrics
 }
 
 // Command types for state machine operations
@@ -104,13 +106,14 @@ type RemoveWorkerPayload struct {
 
 // NewFSM creates a new finite state machine
 // ctx is used as the parent context for tracing operations in Apply
-func NewFSM(ctx context.Context, logger *zap.Logger) *FSM {
+func NewFSM(ctx context.Context, metrics *metrics.Metrics, logger *zap.Logger) *FSM {
 	return &FSM{
 		jobs:            make(map[string]*job.Job),
 		workers:         make(map[string]*storage.WorkerInfo),
 		deadLetterQueue: make(map[string]*job.Job),
 		logger:          logger,
 		ctx:             ctx,
+		metrics:         metrics,
 	}
 }
 
@@ -183,7 +186,7 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 	}
 }
 
-func (f *FSM) applySubmitJob(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applySubmitJob(_ context.Context, payload json.RawMessage) interface{} {
 	var p SubmitJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal SubmitJobPayload: %w", err)
@@ -191,10 +194,17 @@ func (f *FSM) applySubmitJob(ctx context.Context, payload json.RawMessage) inter
 
 	f.jobs[p.Job.ID] = p.Job
 	f.logger.Debug("Job submitted", zap.String("job_id", p.Job.ID))
+
+	// Record metrics
+	if f.metrics != nil {
+		f.metrics.JobsTotal.WithLabelValues(p.Job.Type.String(), p.Job.Status.String()).Inc()
+		f.metrics.JobQueueSize.Inc()
+	}
+
 	return nil
 }
 
-func (f *FSM) applyAssignJob(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyAssignJob(_ context.Context, payload json.RawMessage) interface{} {
 	var p AssignJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal AssignJobPayload: %w", err)
@@ -215,7 +225,7 @@ func (f *FSM) applyAssignJob(ctx context.Context, payload json.RawMessage) inter
 	return nil
 }
 
-func (f *FSM) applyUnassignJob(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyUnassignJob(_ context.Context, payload json.RawMessage) interface{} {
 	var p UnassignJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal UnassignJobPayload: %w", err)
@@ -243,7 +253,7 @@ func (f *FSM) applyUnassignJob(ctx context.Context, payload json.RawMessage) int
 	return nil
 }
 
-func (f *FSM) applyCompleteJob(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyCompleteJob(_ context.Context, payload json.RawMessage) interface{} {
 	var p CompleteJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal CompleteJobPayload: %w", err)
@@ -254,15 +264,29 @@ func (f *FSM) applyCompleteJob(ctx context.Context, payload json.RawMessage) int
 		return fmt.Errorf("CompleteJob: job not found: %s", p.JobID)
 	}
 
+	// Calculate duration if job has started
+	var duration float64
+	if !job.StartedAt.IsZero() {
+		duration = time.Since(job.StartedAt).Seconds()
+	}
+
 	if err := job.Complete(p.Result); err != nil {
 		return fmt.Errorf("failed to complete job %s: %w", p.JobID, err)
 	}
 
 	f.logger.Debug("Job completed", zap.String("job_id", p.JobID))
+
+	// Record metrics
+	if f.metrics != nil {
+		f.metrics.UpdateJobMetrics(job.Type.String(), "completed", duration)
+		f.metrics.JobsActive.Dec()
+		f.metrics.JobQueueSize.Dec()
+	}
+
 	return nil
 }
 
-func (f *FSM) applyFailJob(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyFailJob(_ context.Context, payload json.RawMessage) interface{} {
 	var p FailJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal FailJobPayload: %w", err)
@@ -284,10 +308,17 @@ func (f *FSM) applyFailJob(ctx context.Context, payload json.RawMessage) interfa
 		zap.String("error", p.Error),
 		zap.Int("retry_count", j.RetryCount),
 		zap.Int("max_retries", j.MaxRetries))
+
+	// Record metrics
+	if f.metrics != nil {
+		f.metrics.UpdateJobMetrics(j.Type.String(), "failed", 0)
+		f.metrics.JobsActive.Dec()
+	}
+
 	return nil
 }
 
-func (f *FSM) applyRetryJob(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyRetryJob(_ context.Context, payload json.RawMessage) interface{} {
 	var p RetryJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal RetryJobPayload: %w", err)
@@ -312,7 +343,7 @@ func (f *FSM) applyRetryJob(ctx context.Context, payload json.RawMessage) interf
 	return nil
 }
 
-func (f *FSM) applyMoveToDLQ(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyMoveToDLQ(_ context.Context, payload json.RawMessage) interface{} {
 	var p MoveToDLQPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal MoveToDLQPayload: %w", err)
@@ -334,7 +365,7 @@ func (f *FSM) applyMoveToDLQ(ctx context.Context, payload json.RawMessage) inter
 	return nil
 }
 
-func (f *FSM) applyRetryFromDLQ(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyRetryFromDLQ(_ context.Context, payload json.RawMessage) interface{} {
 	var p RetryFromDLQPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal RetryFromDLQPayload: %w", err)
@@ -360,7 +391,7 @@ func (f *FSM) applyRetryFromDLQ(ctx context.Context, payload json.RawMessage) in
 	return nil
 }
 
-func (f *FSM) applyRegisterWorker(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyRegisterWorker(_ context.Context, payload json.RawMessage) interface{} {
 	var p RegisterWorkerPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal RegisterWorkerPayload: %w", err)
@@ -371,7 +402,7 @@ func (f *FSM) applyRegisterWorker(ctx context.Context, payload json.RawMessage) 
 	return nil
 }
 
-func (f *FSM) applyRemoveWorker(ctx context.Context, payload json.RawMessage) interface{} {
+func (f *FSM) applyRemoveWorker(_ context.Context, payload json.RawMessage) interface{} {
 	var p RemoveWorkerPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal RemoveWorkerPayload: %w", err)

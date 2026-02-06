@@ -29,6 +29,7 @@ type Config struct {
 	Scheduler SchedulerConfig `mapstructure:"scheduler"`
 	Log       LogConfig       `mapstructure:"log"`
 	Security  SecurityConfig  `mapstructure:"security"`
+	Metrics   MetricsConfig   `mapstructure:"metrics"`
 
 	mu    sync.RWMutex
 	viper *viper.Viper
@@ -107,6 +108,13 @@ type LogConfig struct {
 	Output       string `mapstructure:"output"`
 	AuditEnabled bool   `mapstructure:"audit_enabled"`
 	AuditOutput  string `mapstructure:"audit_output"`
+}
+
+type MetricsConfig struct {
+	Enabled         bool          `mapstructure:"enabled"`
+	Port            int           `mapstructure:"port"`
+	Path            string        `mapstructure:"path"`
+	CollectInterval time.Duration `mapstructure:"collect_interval"`
 }
 
 // SecurityConfig holds all security-related configuration
@@ -344,6 +352,12 @@ func setCommonDefaults(v *viper.Viper) {
 	v.SetDefault("log.output", "stdout")
 	v.SetDefault("log.audit_enabled", true)
 	v.SetDefault("log.audit_output", "stdout")
+
+	// Metrics
+	v.SetDefault("metrics.enabled", true)
+	v.SetDefault("metrics.port", 9090)
+	v.SetDefault("metrics.path", "/metrics")
+	v.SetDefault("metrics.collect_interval", "15s")
 
 	// JWT
 	v.SetDefault("security.jwt.secret_key", "change-this-secret-key")

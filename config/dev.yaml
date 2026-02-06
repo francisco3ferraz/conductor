@@ -46,6 +46,12 @@ log:
   audit_enabled: true
   audit_output: stdout
 
+metrics:
+  enabled: true
+  port: 9090
+  path: /metrics
+  collect_interval: 15s
+
 security:
   tls:
     enabled: false

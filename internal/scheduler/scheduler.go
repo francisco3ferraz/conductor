@@ -10,6 +10,7 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/failover"
 	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/metrics"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.uber.org/zap"
@@ -40,21 +41,25 @@ type Scheduler struct {
 	// Parent context for lifecycle management
 	ctx context.Context
 
+	// Metrics
+	metrics *metrics.Metrics
+
 	stopCh chan struct{}
 }
 
 // NewScheduler creates a new job scheduler
-func NewScheduler(ctx context.Context, raftNode *consensus.RaftNode, fsm *consensus.FSM, cfg *config.Config, logger *zap.Logger) *Scheduler {
+func NewScheduler(ctx context.Context, raftNode *consensus.RaftNode, fsm *consensus.FSM, cfg *config.Config, metrics *metrics.Metrics, logger *zap.Logger) *Scheduler {
 	s := &Scheduler{
 		raftNode:    raftNode,
 		fsm:         fsm,
-		applier:     consensus.NewApplyCommand(raftNode, cfg.Raft.ApplyTimeout),
+		applier:     consensus.NewApplyCommand(raftNode, cfg.Raft.ApplyTimeout, metrics),
 		logger:      logger,
 		cfg:         cfg,
 		registry:    worker.NewRegistry(),
 		policy:      NewLeastLoadedPolicy(), // Default to least-loaded policy
 		workerConns: make(map[string]*grpc.ClientConn),
 		ctx:         ctx,
+		metrics:     metrics,
 		stopCh:      make(chan struct{}),
 	}
 
@@ -251,9 +256,19 @@ func (s *Scheduler) schedulePendingJobs(ctx context.Context) {
 		policy := s.policy
 		s.mu.RUnlock()
 
+		start := time.Now()
 		worker := policy.SelectWorker(j, availableWorkers)
+		schedulingLatency := time.Since(start).Seconds()
+
 		if worker == nil {
 			s.logger.Warn("Policy returned no worker for job", zap.String("job_id", j.ID))
+			if s.metrics != nil {
+				policyName := "unknown"
+				if policy != nil {
+					policyName = policy.Name()
+				}
+				s.metrics.RecordSchedulingAttempt(policyName, "no_worker", schedulingLatency)
+			}
 			continue
 		}
 
@@ -264,6 +279,14 @@ func (s *Scheduler) schedulePendingJobs(ctx context.Context) {
 				zap.String("worker_id", worker.ID),
 				zap.Error(err),
 			)
+			if s.metrics != nil {
+				policyName := "unknown"
+				if policy != nil {
+					policyName = policy.Name()
+				}
+				s.metrics.RecordSchedulingAttempt(policyName, "raft_error", schedulingLatency)
+				s.metrics.AssignmentFailures.WithLabelValues("raft_error").Inc()
+			}
 			continue
 		}
 
@@ -274,6 +297,15 @@ func (s *Scheduler) schedulePendingJobs(ctx context.Context) {
 				zap.String("worker_id", worker.ID),
 				zap.Error(err),
 			)
+
+			if s.metrics != nil {
+				policyName := "unknown"
+				if policy != nil {
+					policyName = policy.Name()
+				}
+				s.metrics.RecordSchedulingAttempt(policyName, "send_error", schedulingLatency)
+				s.metrics.AssignmentFailures.WithLabelValues("send_error").Inc()
+			}
 
 			// CRITICAL: Rollback the Raft assignment to prevent orphaned jobs
 			if rollbackErr := s.applier.UnassignJob(j.ID); rollbackErr != nil {
@@ -287,6 +319,16 @@ func (s *Scheduler) schedulePendingJobs(ctx context.Context) {
 				)
 			}
 			continue
+		}
+
+		// Record successful scheduling
+		if s.metrics != nil {
+			policyName := "unknown"
+			if policy != nil {
+				policyName = policy.Name()
+			}
+			s.metrics.RecordSchedulingAttempt(policyName, "success", schedulingLatency)
+			s.metrics.JobsActive.Inc()
 		}
 
 		// Update worker's active job count in registry (not on the local copy!)

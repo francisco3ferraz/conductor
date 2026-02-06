@@ -46,6 +46,12 @@ log:
   audit_enabled: true
   audit_output: /var/log/conductor/audit.log
 
+metrics:
+  enabled: true
+  port: 9090
+  path: /metrics
+  collect_interval: 20s
+
 security:
   tls:
     enabled: true

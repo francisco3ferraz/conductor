@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/metrics"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 )
 
@@ -13,18 +14,21 @@ import (
 type ApplyCommand struct {
 	raft         *RaftNode
 	applyTimeout time.Duration
+	metrics      *metrics.Metrics
 }
 
 // NewApplyCommand creates a new command applier
-func NewApplyCommand(raftNode *RaftNode, applyTimeout time.Duration) *ApplyCommand {
+func NewApplyCommand(raftNode *RaftNode, applyTimeout time.Duration, metrics *metrics.Metrics) *ApplyCommand {
 	return &ApplyCommand{
 		raft:         raftNode,
 		applyTimeout: applyTimeout,
+		metrics:      metrics,
 	}
 }
 
 // SubmitJob submits a new job to the cluster
 func (a *ApplyCommand) SubmitJob(j *job.Job) error {
+	start := time.Now()
 	payload, err := json.Marshal(SubmitJobPayload{Job: j})
 	if err != nil {
 		return fmt.Errorf("failed to marshal job: %w", err)
@@ -40,7 +44,18 @@ func (a *ApplyCommand) SubmitJob(j *job.Job) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, a.applyTimeout)
+	err = a.raft.Apply(cmdBytes, a.applyTimeout)
+
+	// Record metrics
+	if a.metrics != nil {
+		status := "success"
+		if err != nil {
+			status = "error"
+		}
+		a.metrics.RecordRaftApply(CommandSubmitJob, status, time.Since(start).Seconds())
+	}
+
+	return err
 }
 
 // AssignJob assigns a job to a worker

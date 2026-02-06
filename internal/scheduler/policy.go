@@ -10,6 +10,7 @@ import (
 // SchedulingPolicy defines how jobs are assigned to workers
 type SchedulingPolicy interface {
 	SelectWorker(job *job.Job, workers []*worker.WorkerInfo) *worker.WorkerInfo
+	Name() string
 }
 
 // RoundRobinPolicy assigns jobs to workers in a round-robin fashion
@@ -19,6 +20,10 @@ type RoundRobinPolicy struct {
 
 func NewRoundRobinPolicy() *RoundRobinPolicy {
 	return &RoundRobinPolicy{lastWorkerIndex: -1}
+}
+
+func (p *RoundRobinPolicy) Name() string {
+	return "round-robin"
 }
 
 func (p *RoundRobinPolicy) SelectWorker(j *job.Job, workers []*worker.WorkerInfo) *worker.WorkerInfo {
@@ -35,6 +40,10 @@ type LeastLoadedPolicy struct{}
 
 func NewLeastLoadedPolicy() *LeastLoadedPolicy {
 	return &LeastLoadedPolicy{}
+}
+
+func (p *LeastLoadedPolicy) Name() string {
+	return "least-loaded"
 }
 
 func (p *LeastLoadedPolicy) SelectWorker(j *job.Job, workers []*worker.WorkerInfo) *worker.WorkerInfo {
@@ -58,6 +67,10 @@ type PriorityPolicy struct{}
 
 func NewPriorityPolicy() *PriorityPolicy {
 	return &PriorityPolicy{}
+}
+
+func (p *PriorityPolicy) Name() string {
+	return "priority"
 }
 
 func (p *PriorityPolicy) SelectWorker(j *job.Job, workers []*worker.WorkerInfo) *worker.WorkerInfo {
@@ -92,6 +105,10 @@ func NewRandomPolicy() *RandomPolicy {
 	return &RandomPolicy{}
 }
 
+func (p *RandomPolicy) Name() string {
+	return "random"
+}
+
 func (p *RandomPolicy) SelectWorker(j *job.Job, workers []*worker.WorkerInfo) *worker.WorkerInfo {
 	if len(workers) == 0 {
 		return nil
@@ -110,6 +127,10 @@ type CapacityAwarePolicy struct{}
 
 func NewCapacityAwarePolicy() *CapacityAwarePolicy {
 	return &CapacityAwarePolicy{}
+}
+
+func (p *CapacityAwarePolicy) Name() string {
+	return "capacity-aware"
 }
 
 func (p *CapacityAwarePolicy) SelectWorker(j *job.Job, workers []*worker.WorkerInfo) *worker.WorkerInfo {

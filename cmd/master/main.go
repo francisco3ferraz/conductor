@@ -16,11 +16,13 @@ import (
 	"github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
+	"github.com/francisco3ferraz/conductor/internal/metrics"
 	"github.com/francisco3ferraz/conductor/internal/rpc"
 	"github.com/francisco3ferraz/conductor/internal/scheduler"
 	"github.com/francisco3ferraz/conductor/internal/security"
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"github.com/francisco3ferraz/conductor/internal/tracing"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -90,8 +92,12 @@ func main() {
 
 	logger.Info("Storage initialized", zap.String("type", "boltdb"), zap.String("path", boltPath))
 
-	// Initialize Raft FSM with tracing context
-	fsm := consensus.NewFSM(ctx, logger)
+	// Initialize Prometheus metrics
+	m := metrics.NewMetrics("conductor")
+	logger.Info("Prometheus metrics initialized")
+
+	// Initialize Raft FSM with tracing context and metrics
+	fsm := consensus.NewFSM(ctx, m, logger)
 
 	// Initialize security components
 	var raftTLSConfig *security.TLSConfig
@@ -289,7 +295,7 @@ func main() {
 	proto.RegisterMasterServiceServer(grpcServer, masterSvc)
 
 	// Create and start scheduler with parent context for proper lifecycle management
-	sched := scheduler.NewScheduler(ctx, raftNode, fsm, cfg, logger)
+	sched := scheduler.NewScheduler(ctx, raftNode, fsm, cfg, m, logger)
 
 	// Configure scheduling policy based on config
 	policy := getSchedulingPolicy(cfg.Scheduler.SchedulingPolicy, logger)
@@ -300,6 +306,20 @@ func main() {
 
 	// Wire scheduler to master server
 	masterSvc.SetScheduler(sched)
+
+	// Start Prometheus HTTP server for metrics
+	metricsAddr := fmt.Sprintf(":%d", cfg.Metrics.Port)
+	metricsServer := &http.Server{
+		Addr:    metricsAddr,
+		Handler: promhttp.Handler(),
+	}
+
+	go func() {
+		logger.Info("Starting Prometheus metrics server", zap.String("addr", metricsAddr))
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Metrics server error", zap.Error(err))
+		}
+	}()
 
 	// Start gRPC server
 	grpcAddr := fmt.Sprintf(":%d", cfg.GRPC.MasterPort)
