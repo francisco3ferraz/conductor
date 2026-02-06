@@ -32,6 +32,8 @@ type RecoveryManager struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
+	// Recovery statistics
+	stats RecoveryStats
 }
 
 // JobStateMachine interface for interacting with job state
@@ -150,6 +152,12 @@ func (rm *RecoveryManager) recoverWorkerJobs(workerID string) error {
 	jobs := rm.fsm.ListJobs()
 	var affectedJobs []*job.Job
 
+	// Track recovery attempt
+	rm.mu.Lock()
+	rm.stats.TotalRecoveries++
+	rm.stats.LastRecoveryTime = time.Now()
+	rm.mu.Unlock()
+
 	for _, j := range jobs {
 		if j.AssignedTo == workerID && (j.Status == job.StatusAssigned || j.Status == job.StatusRunning) {
 			affectedJobs = append(affectedJobs, j)
@@ -178,10 +186,27 @@ func (rm *RecoveryManager) recoverWorkerJobs(workerID string) error {
 				zap.Error(err),
 			)
 			failedCount++
+			// Track failed job
+			rm.mu.Lock()
+			rm.stats.JobsFailed++
+			rm.mu.Unlock()
 		} else {
 			recoveredCount++
+			// Track reassigned job
+			rm.mu.Lock()
+			rm.stats.JobsReassigned++
+			rm.mu.Unlock()
 		}
 	}
+
+	// Track overall recovery result
+	rm.mu.Lock()
+	if failedCount == 0 {
+		rm.stats.SuccessfulRecoveries++
+	} else {
+		rm.stats.FailedRecoveries++
+	}
+	rm.mu.Unlock()
 
 	rm.logger.Info("Job recovery completed",
 		zap.String("worker_id", workerID),
@@ -232,8 +257,17 @@ func (rm *RecoveryManager) recoverJob(j *job.Job) error {
 	}
 
 	// Add delay before reassignment to allow system to stabilize
+	// Use context-aware sleep so it can be cancelled during shutdown
 	if rm.retryDelay > 0 {
-		time.Sleep(rm.retryDelay)
+		timer := time.NewTimer(rm.retryDelay)
+		select {
+		case <-timer.C:
+			// Delay completed normally
+		case <-rm.ctx.Done():
+			// Context cancelled, stop waiting
+			timer.Stop()
+			return rm.ctx.Err()
+		}
 	}
 
 	// Check if there are any healthy workers available
@@ -342,14 +376,14 @@ func (rm *RecoveryManager) GetRecoveryStats() RecoveryStats {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 
-	// In a real implementation, these would be tracked properly
+	// Return copy of tracked stats
 	return RecoveryStats{
-		TotalRecoveries:      0, // TODO: Track these metrics
-		SuccessfulRecoveries: 0,
-		FailedRecoveries:     0,
-		JobsReassigned:       0,
-		JobsFailed:           0,
-		LastRecoveryTime:     time.Now(),
+		TotalRecoveries:      rm.stats.TotalRecoveries,
+		SuccessfulRecoveries: rm.stats.SuccessfulRecoveries,
+		FailedRecoveries:     rm.stats.FailedRecoveries,
+		JobsReassigned:       rm.stats.JobsReassigned,
+		JobsFailed:           rm.stats.JobsFailed,
+		LastRecoveryTime:     rm.stats.LastRecoveryTime,
 	}
 }
 

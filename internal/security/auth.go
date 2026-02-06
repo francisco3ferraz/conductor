@@ -22,9 +22,16 @@ type AuthManager struct {
 	auditLogger  *zap.Logger
 	mu           sync.RWMutex
 	refreshCache map[string]*RefreshToken // userID -> refresh token
+	roleProvider RoleProvider             // For fetching user roles
 	ctx          context.Context
 	cancel       context.CancelFunc
 	cleanupDone  chan struct{}
+}
+
+// RoleProvider interface for fetching user roles
+// Implementations can fetch from RBAC, database, or external service
+type RoleProvider interface {
+	GetUserRoles(userID string) ([]string, error)
 }
 
 // JWTConfig holds JWT configuration
@@ -75,6 +82,13 @@ func NewAuthManager(config *JWTConfig, logger *zap.Logger) *AuthManager {
 	go am.cleanupExpiredTokens()
 
 	return am
+}
+
+// SetRoleProvider sets the role provider for fetching user roles
+func (am *AuthManager) SetRoleProvider(provider RoleProvider) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.roleProvider = provider
 }
 
 // cleanupExpiredTokens periodically removes expired refresh tokens to prevent memory leak
@@ -231,12 +245,26 @@ func (am *AuthManager) RefreshAccessToken(refreshToken string) (string, error) {
 		return "", fmt.Errorf("refresh token expired")
 	}
 
-	// Get user's current roles (in production, fetch from database)
-	// For now, we'll generate a token with empty roles
-	// TODO: Fetch user roles from user service/database
+	// Fetch current user roles from role provider
 	roles := []string{}
+	am.mu.RLock()
+	roleProvider := am.roleProvider
+	am.mu.RUnlock()
 
-	// Generate new access token
+	if roleProvider != nil {
+		if userRoles, err := roleProvider.GetUserRoles(userID); err == nil {
+			roles = userRoles
+		} else {
+			am.logger.Warn("Failed to fetch user roles, using empty roles",
+				zap.String("user_id", userID),
+				zap.Error(err))
+		}
+	} else {
+		am.logger.Debug("No role provider configured, using empty roles",
+			zap.String("user_id", userID))
+	}
+
+	// Generate new access token with current roles
 	accessToken, err := am.GenerateToken(userID, roles, am.config.AccessTokenTTL)
 	if err != nil {
 		return "", err

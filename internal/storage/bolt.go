@@ -46,7 +46,7 @@ func NewBoltStore(path string) (*BoltStore, error) {
 	})
 	if err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed to initialize BoltDB buckets: %w", err)
 	}
 
 	return &BoltStore{db: db}, nil
@@ -89,12 +89,12 @@ func (s *BoltStore) GetJob(id string) (*job.Job, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get job %s from BoltDB: %w", id, err)
 	}
 	return &j, nil
 }
 
-// ListJobs returns all jobs from BoltDB
+// ListJobs returns all jobs from BoltDB with optional filtering
 func (s *BoltStore) ListJobs(filter JobFilter) ([]*job.Job, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -107,15 +107,33 @@ func (s *BoltStore) ListJobs(filter JobFilter) ([]*job.Job, error) {
 			if err := json.Unmarshal(v, &j); err != nil {
 				return err
 			}
+
+			// Apply status filter if specified
+			if filter.HasStatusFilter && j.Status != filter.Status {
+				return nil // Skip this job
+			}
+
 			jobs = append(jobs, &j)
 			return nil
 		})
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list jobs from BoltDB: %w", err)
 	}
-	return jobs, nil
+
+	// Apply pagination
+	start := filter.Offset
+	if start > len(jobs) {
+		return []*job.Job{}, nil
+	}
+
+	end := start + filter.Limit
+	if filter.Limit == 0 || end > len(jobs) {
+		end = len(jobs)
+	}
+
+	return jobs[start:end], nil
 }
 
 // DeleteJob removes a job from BoltDB
@@ -161,7 +179,7 @@ func (s *BoltStore) GetWorker(id string) (*WorkerInfo, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get worker %s from BoltDB: %w", id, err)
 	}
 	return &w, nil
 }
@@ -185,7 +203,7 @@ func (s *BoltStore) ListWorkers() ([]*WorkerInfo, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list workers from BoltDB: %w", err)
 	}
 	return workers, nil
 }

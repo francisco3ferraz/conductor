@@ -8,19 +8,17 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // sendJobToWorker sends a job assignment to a worker via gRPC
 func (s *Scheduler) sendJobToWorker(parentCtx context.Context, j *job.Job, w *worker.WorkerInfo) error {
-	// Connect to worker
-	conn, err := grpc.NewClient(w.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Get pooled connection to worker instead of creating a new one each time
+	conn, err := s.getWorkerConnection(w.Address)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get connection to worker %s at %s: %w", w.ID, w.Address, err)
 	}
-	defer conn.Close()
+	// Don't close the connection - it's managed by the connection pool
 
 	client := proto.NewWorkerServiceClient(conn)
 
@@ -47,11 +45,11 @@ func (s *Scheduler) sendJobToWorker(parentCtx context.Context, j *job.Job, w *wo
 		Job:      pbJob,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send job %s to worker %s: %w", j.ID, w.ID, err)
 	}
 
 	if !resp.Accepted {
-		return fmt.Errorf("worker rejected job: %s", resp.Message)
+		return fmt.Errorf("worker %s rejected job %s: %s", w.ID, j.ID, resp.Message)
 	}
 
 	return nil
@@ -65,12 +63,12 @@ func (s *Scheduler) cancelJobOnWorker(parentCtx context.Context, jobID, workerID
 		return fmt.Errorf("worker %s not found in registry", workerID)
 	}
 
-	// Connect to worker
-	conn, err := grpc.NewClient(w.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Get pooled connection to worker
+	conn, err := s.getWorkerConnection(w.Address)
 	if err != nil {
-		return fmt.Errorf("failed to connect to worker: %w", err)
+		return fmt.Errorf("failed to get connection to worker: %w", err)
 	}
-	defer conn.Close()
+	// Don't close the connection - it's managed by the connection pool
 
 	client := proto.NewWorkerServiceClient(conn)
 

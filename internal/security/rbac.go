@@ -23,6 +23,8 @@ const (
 	PermissionCancelJob   Permission = "job:cancel"
 	PermissionViewJob     Permission = "job:view"
 	PermissionListJobs    Permission = "job:list"
+	PermissionViewDLQ     Permission = "job:dlq:view"
+	PermissionRetryDLQ    Permission = "job:dlq:retry"
 	PermissionManageNodes Permission = "cluster:manage"
 	PermissionViewMetrics Permission = "metrics:view"
 	PermissionAdmin       Permission = "admin:*"
@@ -50,6 +52,8 @@ var (
 			PermissionCancelJob,
 			PermissionViewJob,
 			PermissionListJobs,
+			PermissionViewDLQ,
+			PermissionRetryDLQ,
 			PermissionViewMetrics,
 		},
 	}
@@ -59,6 +63,7 @@ var (
 		Permissions: []Permission{
 			PermissionViewJob,
 			PermissionListJobs,
+			PermissionViewDLQ,
 			PermissionViewMetrics,
 		},
 	}
@@ -189,6 +194,23 @@ func (r *RBAC) GetUser(userID string) (*User, error) {
 	return user, nil
 }
 
+// GetUserRoles returns role names for a user (implements RoleProvider interface)
+func (r *RBAC) GetUserRoles(userID string) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	user, ok := r.users[userID]
+	if !ok {
+		return nil, fmt.Errorf("user not found: %s", userID)
+	}
+
+	roleNames := make([]string, len(user.Roles))
+	for i, role := range user.Roles {
+		roleNames[i] = role.Name
+	}
+	return roleNames, nil
+}
+
 // DefinePolicy defines required permissions for a gRPC method
 func (r *RBAC) DefinePolicy(method string, permissions []Permission) {
 	// Convert Permission constants to strings for PolicyManager
@@ -222,8 +244,15 @@ func (r *RBAC) CheckPermission(userID string, method string) error {
 	// Get required permissions from policy manager
 	requiredPerms, ok := r.policyManager.GetMethodPermissions(method)
 	if !ok {
-		// No policy defined - allow by default
-		return nil
+		// No policy defined - deny by default for security
+		// Allow only health checks and registration
+		if method == "/grpc.health.v1.Health/Check" || method == "/proto.MasterService/RegisterWorker" {
+			return nil
+		}
+		r.logger.Warn("No RBAC policy defined for method - denying access",
+			zap.String("method", method),
+			zap.String("user_id", userID))
+		return fmt.Errorf("no RBAC policy defined for method %s", method)
 	}
 
 	// Check if user has any of the required permissions
@@ -236,6 +265,32 @@ func (r *RBAC) CheckPermission(userID string, method string) error {
 	}
 
 	return fmt.Errorf("user %s lacks required permissions for %s", userID, method)
+}
+
+// DefineDefaultPolicies defines default RBAC policies for all gRPC endpoints
+func (r *RBAC) DefineDefaultPolicies() {
+	// Job submission and management
+	r.DefinePolicy("/proto.MasterService/SubmitJob", []Permission{PermissionSubmitJob})
+	r.DefinePolicy("/proto.MasterService/CancelJob", []Permission{PermissionCancelJob})
+
+	// Job viewing
+	r.DefinePolicy("/proto.MasterService/GetJobStatus", []Permission{PermissionViewJob})
+	r.DefinePolicy("/proto.MasterService/ListJobs", []Permission{PermissionListJobs})
+
+	// Cluster management
+	r.DefinePolicy("/proto.MasterService/JoinCluster", []Permission{PermissionManageNodes})
+	r.DefinePolicy("/proto.MasterService/GetClusterHealth", []Permission{PermissionViewMetrics})
+	r.DefinePolicy("/proto.MasterService/ListWorkers", []Permission{PermissionViewMetrics})
+
+	// Worker operations (workers should have these permissions)
+	r.DefinePolicy("/proto.MasterService/Heartbeat", []Permission{PermissionViewJob})    // Workers can heartbeat
+	r.DefinePolicy("/proto.MasterService/ReportResult", []Permission{PermissionViewJob}) // Workers can report results
+
+	// DLQ operations
+	r.DefinePolicy("/proto.MasterService/ListDLQ", []Permission{PermissionViewDLQ})
+	r.DefinePolicy("/proto.MasterService/RetryFromDLQ", []Permission{PermissionRetryDLQ})
+
+	r.logger.Info("Default RBAC policies defined for all endpoints")
 }
 
 // RBACInterceptor creates a gRPC interceptor for RBAC

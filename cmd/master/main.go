@@ -90,8 +90,8 @@ func main() {
 
 	logger.Info("Storage initialized", zap.String("type", "boltdb"), zap.String("path", boltPath))
 
-	// Initialize Raft FSM
-	fsm := consensus.NewFSM(logger)
+	// Initialize Raft FSM with tracing context
+	fsm := consensus.NewFSM(ctx, logger)
 
 	// Initialize security components
 	var raftTLSConfig *security.TLSConfig
@@ -152,10 +152,8 @@ func main() {
 		)
 
 		// Create gRPC client to join
-		conn, err := grpc.DialContext(context.Background(), cfg.Cluster.JoinAddr,
+		conn, err := grpc.NewClient(cfg.Cluster.JoinAddr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithBlock(),
-			grpc.WithTimeout(10*time.Second),
 		)
 		if err != nil {
 			logger.Fatal("Failed to connect to cluster", zap.Error(err))
@@ -163,7 +161,7 @@ func main() {
 		defer conn.Close()
 
 		client := proto.NewMasterServiceClient(conn)
-		resp, err := client.JoinCluster(context.Background(), &proto.JoinClusterRequest{
+		resp, err := client.JoinCluster(ctx, &proto.JoinClusterRequest{
 			NodeId:  cfg.Cluster.NodeID,
 			Address: cfg.Cluster.BindAddr,
 		})
@@ -208,19 +206,48 @@ func main() {
 			PolicyFile:      cfg.Security.RBAC.PolicyFile,
 		}
 		rbac = security.NewRBAC(rbacConfig, logger)
+
+		// Define default policies for all endpoints
+		rbac.DefineDefaultPolicies()
+
 		// Add default admin user for testing
 		if err := rbac.AddUser("admin", "admin", "admin"); err != nil {
 			logger.Fatal("Failed to create admin user", zap.Error(err))
 		}
-		logger.Info("RBAC enabled")
+
+		// Wire RBAC as role provider for auth manager
+		authManager.SetRoleProvider(rbac)
+		logger.Info("RBAC enabled with default policies and connected to auth manager")
 	}
+
+	// Initialize rate limiter
+	var rateLimiter *security.RateLimiter
+	logger.Info("Rate limit configuration",
+		zap.Bool("enabled", cfg.Security.RateLimit.Enabled),
+		zap.Float64("requests_per_sec", cfg.Security.RateLimit.RequestsPerSec),
+		zap.Int("burst", cfg.Security.RateLimit.Burst))
+	if cfg.Security.RateLimit.Enabled {
+		// Pass the config struct directly - no need to recreate it
+		rateLimiter = security.NewRateLimiter(&cfg.Security.RateLimit, logger)
+		logger.Info("Rate limiting enabled",
+			zap.Float64("requests_per_sec", cfg.Security.RateLimit.RequestsPerSec),
+			zap.Int("burst", cfg.Security.RateLimit.Burst))
+	} else {
+		// Create disabled rate limiter for consistency
+		disabledConfig := cfg.Security.RateLimit
+		disabledConfig.Enabled = false
+		rateLimiter = security.NewRateLimiter(&disabledConfig, logger)
+		logger.Warn("Rate limiting DISABLED - vulnerable to DoS attacks")
+	}
+	defer rateLimiter.Shutdown()
 
 	// Get tracing-enabled gRPC server options
 	grpcOpts := rpc.GetServerInterceptors(logger)
 
-	// Add additional interceptors
+	// Add additional interceptors (order matters: rate limit -> auth -> RBAC)
 	additionalInterceptors := []grpc.UnaryServerInterceptor{
-		authManager.AuthInterceptor(),
+		security.RateLimitInterceptor(rateLimiter, logger), // Rate limit first
+		authManager.AuthInterceptor(),                      // Then authenticate
 	}
 
 	// Add RBAC interceptor if enabled
@@ -261,8 +288,8 @@ func main() {
 	masterSvc := rpc.NewMasterServer(raftNode, fsm, cfg, logger)
 	proto.RegisterMasterServiceServer(grpcServer, masterSvc)
 
-	// Create and start scheduler
-	sched := scheduler.NewScheduler(raftNode, fsm, cfg, logger)
+	// Create and start scheduler with parent context for proper lifecycle management
+	sched := scheduler.NewScheduler(ctx, raftNode, fsm, cfg, logger)
 
 	// Configure scheduling policy based on config
 	policy := getSchedulingPolicy(cfg.Scheduler.SchedulingPolicy, logger)
@@ -289,7 +316,7 @@ func main() {
 	}()
 
 	// Start scheduler in background
-	schedCtx, schedCancel := context.WithCancel(context.Background())
+	schedCtx, schedCancel := context.WithCancel(ctx)
 	defer schedCancel()
 
 	go sched.Start(schedCtx)
@@ -326,7 +353,7 @@ func main() {
 	// Graceful shutdown
 	logger.Info("Shutting down master node...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	// Stop scheduler first (stops failover components)
@@ -346,7 +373,7 @@ func main() {
 	grpcServer.GracefulStop()
 
 	// Stop HTTP server
-	if err := httpServer.Shutdown(ctx); err != nil {
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", zap.Error(err))
 	}
 
@@ -377,7 +404,9 @@ func parseLogLevel(level string) zapcore.Level {
 func healthHandler(logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			logger.Error("Failed to write health response", zap.Error(err))
+		}
 	}
 }
 
@@ -388,12 +417,16 @@ func readyHandler(logger *zap.Logger, store storage.Store) http.HandlerFunc {
 		if err != nil {
 			logger.Error("Storage health check failed", zap.Error(err))
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("NOT READY"))
+			if _, writeErr := w.Write([]byte("NOT READY")); writeErr != nil {
+				logger.Error("Failed to write not ready response", zap.Error(writeErr))
+			}
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("READY"))
+		if _, err := w.Write([]byte("READY")); err != nil {
+			logger.Error("Failed to write ready response", zap.Error(err))
+		}
 	}
 }
 

@@ -101,7 +101,8 @@ func (w *WorkerClient) Register(ctx context.Context, maxJobs int32, address stri
 }
 
 // StartHeartbeat starts sending periodic heartbeats to master
-func (w *WorkerClient) StartHeartbeat(ctx context.Context, interval time.Duration) {
+// The interval is configured when creating the HeartbeatSender
+func (w *WorkerClient) StartHeartbeat(ctx context.Context) {
 	w.heartbeat.Start(ctx)
 }
 
@@ -121,7 +122,17 @@ func (w *WorkerClient) ExecuteJob(ctx context.Context, j *job.Job) error {
 	defer func() { w.activeJobs-- }()
 
 	// Start the job
-	j.Start()
+	if err := j.Start(); err != nil {
+		w.logger.Error("Failed to start job",
+			zap.String("job_id", j.ID),
+			zap.Error(err))
+		w.totalFailed++
+		// Job is in invalid state, report failure
+		if reportErr := w.reportFailure(ctx, j.ID, fmt.Sprintf("failed to start job: %v", err)); reportErr != nil {
+			w.logger.Error("Failed to report job start failure", zap.Error(reportErr))
+		}
+		return fmt.Errorf("failed to start job: %w", err)
+	}
 
 	// Execute the job
 	result := w.executor.Execute(ctx, j)

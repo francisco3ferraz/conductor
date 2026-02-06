@@ -312,19 +312,3 @@ func (whr *WorkerHealthRegistry) ListActiveWorkers() []*WorkerHealth {
 
 	return activeWorkers
 }
-
-// GetFailedWorkers returns all workers that are currently failed
-func (whr *WorkerHealthRegistry) GetFailedWorkers() []*WorkerHealth {
-	whr.mu.RLock()
-	defer whr.mu.RUnlock()
-
-	var failedWorkers []*WorkerHealth
-	for _, health := range whr.workers {
-		if health.Status == WorkerStatusFailed {
-			healthCopy := *health
-			failedWorkers = append(failedWorkers, &healthCopy)
-		}
-	}
-
-	return failedWorkers
-}

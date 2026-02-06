@@ -13,6 +13,8 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/storage"
 	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Scheduler assigns jobs to workers
@@ -31,20 +33,29 @@ type Scheduler struct {
 	failureDetector *failover.FailureDetector
 	recoveryManager *failover.RecoveryManager
 
+	// Connection pooling for worker gRPC connections
+	workerConns map[string]*grpc.ClientConn
+	connMu      sync.RWMutex
+
+	// Parent context for lifecycle management
+	ctx context.Context
+
 	stopCh chan struct{}
 }
 
 // NewScheduler creates a new job scheduler
-func NewScheduler(raftNode *consensus.RaftNode, fsm *consensus.FSM, cfg *config.Config, logger *zap.Logger) *Scheduler {
+func NewScheduler(ctx context.Context, raftNode *consensus.RaftNode, fsm *consensus.FSM, cfg *config.Config, logger *zap.Logger) *Scheduler {
 	s := &Scheduler{
-		raftNode: raftNode,
-		fsm:      fsm,
-		applier:  consensus.NewApplyCommand(raftNode),
-		logger:   logger,
-		cfg:      cfg,
-		registry: worker.NewRegistry(),
-		policy:   NewLeastLoadedPolicy(), // Default to least-loaded policy
-		stopCh:   make(chan struct{}),
+		raftNode:    raftNode,
+		fsm:         fsm,
+		applier:     consensus.NewApplyCommand(raftNode, cfg.Raft.ApplyTimeout),
+		logger:      logger,
+		cfg:         cfg,
+		registry:    worker.NewRegistry(),
+		policy:      NewLeastLoadedPolicy(), // Default to least-loaded policy
+		workerConns: make(map[string]*grpc.ClientConn),
+		ctx:         ctx,
+		stopCh:      make(chan struct{}),
 	}
 
 	// Initialize failover components
@@ -122,6 +133,18 @@ func (s *Scheduler) Stop() {
 	if s.recoveryManager != nil {
 		s.recoveryManager.Stop()
 	}
+
+	// Close all worker connections
+	s.connMu.Lock()
+	for addr, conn := range s.workerConns {
+		if err := conn.Close(); err != nil {
+			s.logger.Error("Failed to close worker connection",
+				zap.String("addr", addr),
+				zap.Error(err))
+		}
+	}
+	s.workerConns = make(map[string]*grpc.ClientConn)
+	s.connMu.Unlock()
 
 	close(s.stopCh)
 	s.logger.Info("Scheduler stopped")
@@ -266,10 +289,12 @@ func (s *Scheduler) schedulePendingJobs(ctx context.Context) {
 			continue
 		}
 
-		// Update worker's active job count
-		s.mu.Lock()
-		worker.ActiveJobs++
-		s.mu.Unlock()
+		// Update worker's active job count in registry (not on the local copy!)
+		if err := s.registry.IncrementActiveJobs(worker.ID); err != nil {
+			s.logger.Warn("Failed to increment active jobs for worker",
+				zap.String("worker_id", worker.ID),
+				zap.Error(err))
+		}
 
 		s.logger.Info("Job assigned to worker",
 			zap.String("job_id", j.ID),
@@ -399,10 +424,9 @@ func getPolicyName(policy SchedulingPolicy) string {
 // SetJobStore initializes the recovery manager with a job store
 func (s *Scheduler) SetJobStore(jobStore storage.Store) {
 	if s.recoveryManager == nil {
-		// Create context for recovery manager (could be improved to use parent context)
-		ctx := context.Background()
+		// Use scheduler's parent context for recovery manager lifecycle
 		s.recoveryManager = failover.NewRecoveryManager(
-			ctx,           // Parent context for shutdown propagation
+			s.ctx,         // Parent context for proper shutdown propagation
 			s,             // Pass scheduler reference
 			jobStore,      // Job storage
 			s.fsm,         // FSM for job state management
@@ -477,4 +501,38 @@ func (s *Scheduler) GetPendingJobCount() int {
 		}
 	}
 	return count
+}
+
+// getWorkerConnection gets or creates a pooled gRPC connection to a worker
+func (s *Scheduler) getWorkerConnection(addr string) (*grpc.ClientConn, error) {
+	s.connMu.RLock()
+	conn, exists := s.workerConns[addr]
+	s.connMu.RUnlock()
+
+	// Check if we have an existing healthy connection
+	if exists {
+		state := conn.GetState()
+		if state.String() == "READY" || state.String() == "IDLE" {
+			return conn, nil
+		}
+		// Connection is unhealthy, remove it
+		s.connMu.Lock()
+		delete(s.workerConns, addr)
+		s.connMu.Unlock()
+		conn.Close()
+	}
+
+	// Create new connection
+	newConn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to worker at %s: %w", addr, err)
+	}
+
+	// Store in pool
+	s.connMu.Lock()
+	s.workerConns[addr] = newConn
+	s.connMu.Unlock()
+
+	s.logger.Debug("Created new worker connection", zap.String("addr", addr))
+	return newConn, nil
 }

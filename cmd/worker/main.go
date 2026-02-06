@@ -148,7 +148,7 @@ func main() {
 	heartbeatCtx, heartbeatCancel := context.WithCancel(ctx)
 	defer heartbeatCancel()
 
-	go workerClient.StartHeartbeat(heartbeatCtx, cfg.Worker.HeartbeatInterval)
+	go workerClient.StartHeartbeat(heartbeatCtx)
 
 	// Start worker manager
 	if err := mgr.Start(heartbeatCtx); err != nil {
@@ -232,7 +232,12 @@ func main() {
 	logger.Info("Stopped heartbeat - no new jobs will be assigned")
 
 	// Give some time for current jobs to complete
-	time.Sleep(2 * time.Second)
+	shutdownDelay := 2 * time.Second
+	if cfg.Worker.ShutdownDelay > 0 {
+		shutdownDelay = cfg.Worker.ShutdownDelay
+	}
+	logger.Info("Waiting for in-flight jobs", zap.Duration("delay", shutdownDelay))
+	time.Sleep(shutdownDelay)
 
 	// Stop worker manager (will finish current jobs gracefully)
 	mgr.Stop()
@@ -255,7 +260,9 @@ func main() {
 func healthHandler(logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			logger.Error("Failed to write health response", zap.Error(err))
+		}
 	}
 }
 
@@ -266,7 +273,9 @@ func readyHandler(logger *zap.Logger) http.HandlerFunc {
 		// - Connection to master
 		// - Current job count
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("READY"))
+		if _, err := w.Write([]byte("READY")); err != nil {
+			logger.Error("Failed to write ready response", zap.Error(err))
+		}
 	}
 }
 

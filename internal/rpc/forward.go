@@ -165,12 +165,8 @@ func (f *ClientForwarder) getOrCreateConnection(addr string) (*grpc.ClientConn, 
 	}
 
 	// Create new connection
-	ctx, cancel := context.WithTimeout(context.Background(), f.dialTimeout)
-	defer cancel()
-
-	conn, err := grpc.DialContext(ctx, addr,
+	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
@@ -203,11 +199,15 @@ func (f *ClientForwarder) ForwardSubmitJob(ctx context.Context, leaderAddr strin
 
 	conn, err := f.getOrCreateConnection(leaderAddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to leader %s for SubmitJob: %w", leaderAddr, err)
 	}
 
 	client := proto.NewMasterServiceClient(conn)
-	return client.SubmitJob(ctx, req)
+	resp, err := client.SubmitJob(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("leader SubmitJob request failed: %w", err)
+	}
+	return resp, nil
 }
 
 // ForwardCancelJob forwards a job cancellation request to the leader
@@ -219,11 +219,15 @@ func (f *ClientForwarder) ForwardCancelJob(ctx context.Context, leaderAddr strin
 
 	conn, err := f.getOrCreateConnection(leaderAddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to leader %s for CancelJob: %w", leaderAddr, err)
 	}
 
 	client := proto.NewMasterServiceClient(conn)
-	return client.CancelJob(ctx, req)
+	resp, err := client.CancelJob(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("leader CancelJob request failed: %w", err)
+	}
+	return resp, nil
 }
 
 // Close closes all forwarding connections and stops cleanup goroutine

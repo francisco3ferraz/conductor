@@ -56,7 +56,11 @@ security:
     skip_verify: true
     auto_generate: true
   jwt:
-    secret_key: dev-secret-key-change-me
+    # SECURITY: Never commit secrets to version control!
+    # Set JWT_SECRET_KEY environment variable instead:
+    #   export JWT_SECRET_KEY="your-secure-random-secret"
+    # For development, a simple secret is acceptable (not production!)
+    secret_key: "${JWT_SECRET_KEY}"  # Must be set via environment variable
     public_key_path: ""
     issuer: conductor-dev
     audience: conductor-api
@@ -74,3 +78,9 @@ security:
     server_name: ""
     skip_verify: true
     auto_generate: false
+  rate_limit:
+    enabled: false  # Disabled for easier development
+    requests_per_sec: 100
+    burst: 50
+    cleanup_interval: 5m
+    client_ttl: 30m

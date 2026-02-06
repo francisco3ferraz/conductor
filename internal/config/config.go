@@ -70,6 +70,7 @@ type RaftConfig struct {
 	BarrierTimeout    time.Duration `mapstructure:"barrier_timeout"` // Timeout for Raft barrier operations
 	SnapshotInterval  time.Duration `mapstructure:"snapshot_interval"`
 	SnapshotThreshold uint64        `mapstructure:"snapshot_threshold"`
+	ApplyTimeout      time.Duration `mapstructure:"apply_timeout"` // Timeout for Raft Apply operations
 }
 
 type GRPCConfig struct {
@@ -87,6 +88,7 @@ type WorkerConfig struct {
 	HeartbeatTimeout  time.Duration `mapstructure:"heartbeat_timeout"`
 	ResultTimeout     time.Duration `mapstructure:"result_timeout"` // Timeout for reporting job results
 	MaxConcurrentJobs int           `mapstructure:"max_concurrent_jobs"`
+	ShutdownDelay     time.Duration `mapstructure:"shutdown_delay"` // Grace period for in-flight jobs during shutdown
 }
 
 type SchedulerConfig struct {
@@ -120,6 +122,9 @@ type SecurityConfig struct {
 
 	// Raft TLS configuration
 	RaftTLS TLSConfig `mapstructure:"raft_tls"`
+
+	// Rate limiting configuration
+	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
 }
 
 type TLSConfig struct {
@@ -145,6 +150,14 @@ type JWTConfig struct {
 	AccessTokenTTL  time.Duration `mapstructure:"access_token_ttl"`
 	RefreshTokenTTL time.Duration `mapstructure:"refresh_token_ttl"`
 	SkipExpiry      bool          `mapstructure:"skip_expiry"`
+}
+
+type RateLimitConfig struct {
+	Enabled         bool          `mapstructure:"enabled"`
+	RequestsPerSec  float64       `mapstructure:"requests_per_sec"`
+	Burst           int           `mapstructure:"burst"`
+	CleanupInterval time.Duration `mapstructure:"cleanup_interval"` // How often to clean up inactive limiters
+	ClientTTL       time.Duration `mapstructure:"client_ttl"`       // How long to keep inactive client limiters
 }
 
 // Load loads configuration with profile-based defaults
@@ -267,6 +280,11 @@ func bindEnvVars(v *viper.Viper) {
 	v.BindEnv("security.rbac.enabled", "RBAC_ENABLED")
 	v.BindEnv("security.rbac.policy_file", "RBAC_POLICY_FILE")
 
+	// Security - Rate Limiting
+	v.BindEnv("security.rate_limit.enabled", "SECURITY_RATE_LIMIT_ENABLED")
+	v.BindEnv("security.rate_limit.requests_per_sec", "SECURITY_RATE_LIMIT_REQUESTS_PER_SEC")
+	v.BindEnv("security.rate_limit.burst", "SECURITY_RATE_LIMIT_BURST")
+
 	// Security - Raft TLS
 	v.BindEnv("security.raft_tls.enabled", "SECURITY_RAFT_TLS_ENABLED")
 }
@@ -309,6 +327,7 @@ func setCommonDefaults(v *viper.Viper) {
 	v.SetDefault("worker.heartbeat_timeout", "10s")
 	v.SetDefault("worker.result_timeout", "10s")
 	v.SetDefault("worker.max_concurrent_jobs", 10)
+	v.SetDefault("worker.shutdown_delay", "2s")
 
 	// Scheduler
 	v.SetDefault("scheduler.scheduling_policy", "least-loaded")
@@ -335,6 +354,13 @@ func setCommonDefaults(v *viper.Viper) {
 
 	// RBAC
 	v.SetDefault("security.rbac.policy_file", "./config/rbac-policies.json")
+
+	// Rate limiting defaults
+	v.SetDefault("security.rate_limit.enabled", true)
+	v.SetDefault("security.rate_limit.requests_per_sec", 100.0)
+	v.SetDefault("security.rate_limit.burst", 50)
+	v.SetDefault("security.rate_limit.cleanup_interval", "5m")
+	v.SetDefault("security.rate_limit.client_ttl", "30m")
 }
 
 // setDevDefaults sets development-specific defaults
@@ -349,6 +375,7 @@ func setDevDefaults(v *viper.Viper) {
 	v.SetDefault("raft.barrier_timeout", "5s")
 	v.SetDefault("raft.snapshot_interval", "30s")
 	v.SetDefault("raft.snapshot_threshold", uint64(100)) // Snapshot frequently
+	v.SetDefault("raft.apply_timeout", "5s")             // Faster for dev
 
 	// Debug logging
 	v.SetDefault("log.level", "debug")
@@ -374,7 +401,7 @@ func setStagingDefaults(v *viper.Viper) {
 	v.SetDefault("raft.barrier_timeout", "7s")
 	v.SetDefault("raft.snapshot_interval", "120s")
 	v.SetDefault("raft.snapshot_threshold", uint64(8192))
-
+	v.SetDefault("raft.apply_timeout", "10s")
 	// Info logging
 	v.SetDefault("log.level", "info")
 
@@ -404,8 +431,7 @@ func setProdDefaults(v *viper.Viper) {
 	v.SetDefault("raft.election_timeout", "5s")
 	v.SetDefault("raft.barrier_timeout", "10s")
 	v.SetDefault("raft.snapshot_interval", "300s")         // 5 minutes
-	v.SetDefault("raft.snapshot_threshold", uint64(16384)) // 16K entries
-
+	v.SetDefault("raft.snapshot_threshold", uint64(16384)) // 16K entries\tv.SetDefault("raft.apply_timeout", "10s")
 	// Minimal logging
 	v.SetDefault("log.level", "warn")
 
@@ -491,6 +517,10 @@ func (c *Config) Validate() error {
 		}
 		if !c.Security.RBAC.Enabled {
 			errors = append(errors, ValidationError{"security.rbac.enabled", "must be enabled in production"})
+		}
+		// Require JWT secret to be set (not empty or placeholder)
+		if c.Security.JWT.SecretKey == "" || c.Security.JWT.SecretKey == "${JWT_SECRET_KEY}" || c.Security.JWT.SecretKey == "${CONDUCTOR_JWT_SECRET}" {
+			errors = append(errors, ValidationError{"security.jwt.secret_key", "must be set via JWT_SECRET_KEY environment variable in production"})
 		}
 	}
 

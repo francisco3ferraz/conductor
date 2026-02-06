@@ -208,6 +208,47 @@ func (j *Job) RemainingTimeout() time.Duration {
 	return remaining
 }
 
+// Clone creates a deep copy of the job for snapshot purposes
+func (j *Job) Clone() *Job {
+	if j == nil {
+		return nil
+	}
+
+	// Copy the payload slice
+	payloadCopy := make([]byte, len(j.Payload))
+	copy(payloadCopy, j.Payload)
+
+	// Clone the result if it exists
+	var resultCopy *Result
+	if j.Result != nil {
+		outputCopy := make([]byte, len(j.Result.Output))
+		copy(outputCopy, j.Result.Output)
+		resultCopy = &Result{
+			Success:    j.Result.Success,
+			Output:     outputCopy,
+			Error:      j.Result.Error,
+			DurationMs: j.Result.DurationMs,
+		}
+	}
+
+	return &Job{
+		ID:             j.ID,
+		Type:           j.Type,
+		Payload:        payloadCopy,
+		Priority:       j.Priority,
+		Status:         j.Status,
+		AssignedTo:     j.AssignedTo,
+		CreatedAt:      j.CreatedAt,
+		StartedAt:      j.StartedAt,
+		CompletedAt:    j.CompletedAt,
+		Result:         resultCopy,
+		RetryCount:     j.RetryCount,
+		MaxRetries:     j.MaxRetries,
+		ErrorMessage:   j.ErrorMessage,
+		TimeoutSeconds: j.TimeoutSeconds,
+	}
+}
+
 // generateID generates a unique job ID with node ID for distributed uniqueness
 // Uses UUID to ensure uniqueness even across process restarts and multiple nodes
 func generateID(nodeID string) string {

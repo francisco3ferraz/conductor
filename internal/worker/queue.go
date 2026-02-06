@@ -3,6 +3,7 @@ package worker
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/francisco3ferraz/conductor/internal/job"
@@ -162,7 +163,22 @@ func (jq *JobQueue) worker(id int) {
 			zap.Int("worker_id", id))
 
 		// Mark job as running
-		item.Job.Start()
+		if err := item.Job.Start(); err != nil {
+			jq.logger.Error("Failed to start job",
+				zap.String("job_id", item.Job.ID),
+				zap.Error(err))
+			// Report failure since job is in invalid state
+			if jq.reporter != nil {
+				failResult := &job.Result{
+					Success: false,
+					Error:   fmt.Sprintf("failed to start job: %v", err),
+				}
+				if reportErr := jq.reporter.ReportResult(jq.ctx, item.Job.ID, failResult); reportErr != nil {
+					jq.logger.Error("Failed to report job start failure", zap.Error(reportErr))
+				}
+			}
+			continue
+		}
 
 		// Execute with the job's context
 		result := jq.executor.Execute(item.Context, item.Job)

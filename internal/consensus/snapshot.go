@@ -63,22 +63,22 @@ func (f *FSM) CreateSnapshot() (*FSMSnapshot, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	// Deep copy jobs
+	// Deep copy jobs using Clone method
 	jobs := make(map[string]*job.Job)
 	for k, v := range f.jobs {
-		jobs[k] = v
+		jobs[k] = v.Clone()
 	}
 
-	// Deep copy workers
+	// Deep copy workers using Clone method
 	workers := make(map[string]*storage.WorkerInfo)
 	for k, v := range f.workers {
-		workers[k] = v
+		workers[k] = v.Clone()
 	}
 
-	// Deep copy DLQ
+	// Deep copy DLQ using Clone method
 	dlq := make(map[string]*job.Job)
 	for k, v := range f.deadLetterQueue {
-		dlq[k] = v
+		dlq[k] = v.Clone()
 	}
 
 	return &FSMSnapshot{

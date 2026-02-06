@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -14,7 +15,20 @@ type Registry struct {
 	heartbeats map[string]time.Time
 }
 
-// WorkerInfo contains worker metadata and current state
+// WorkerInfo contains worker metadata and current state.
+//
+// ARCHITECTURAL NOTE: This struct is duplicated in storage.WorkerInfo with slight
+// differences (LastHeartbeat as int64 vs time.Time). This is intentional:
+//
+//   - worker.WorkerInfo: In-memory representation optimized for fast access and
+//     time-based operations (scheduling, health checks). Uses time.Time for direct
+//     comparison with time.Now().
+//
+//   - storage.WorkerInfo: Persistence layer representation optimized for serialization
+//     to BoltDB. Uses int64 (Unix timestamp) for database storage efficiency.
+//
+// Proto definitions (WorkerInfo, RaftWorkerInfo) serve gRPC communication and cannot
+// be modified. Use ToStorageWorkerInfo() for conversion when persisting worker state.
 type WorkerInfo struct {
 	ID                string
 	Address           string
@@ -144,6 +158,36 @@ func (r *Registry) CountAvailable() int {
 		}
 	}
 	return count
+}
+
+// IncrementActiveJobs atomically increments the active job count for a worker
+func (r *Registry) IncrementActiveJobs(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	worker, exists := r.workers[id]
+	if !exists {
+		return fmt.Errorf("worker %s not found", id)
+	}
+
+	worker.ActiveJobs++
+	return nil
+}
+
+// DecrementActiveJobs atomically decrements the active job count for a worker
+func (r *Registry) DecrementActiveJobs(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	worker, exists := r.workers[id]
+	if !exists {
+		return fmt.Errorf("worker %s not found", id)
+	}
+
+	if worker.ActiveJobs > 0 {
+		worker.ActiveJobs--
+	}
+	return nil
 }
 
 // ToStorageWorkerInfo converts WorkerInfo to storage.WorkerInfo

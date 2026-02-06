@@ -11,12 +11,16 @@ import (
 
 // ApplyCommand is a helper to apply commands to the Raft cluster
 type ApplyCommand struct {
-	raft *RaftNode
+	raft         *RaftNode
+	applyTimeout time.Duration
 }
 
 // NewApplyCommand creates a new command applier
-func NewApplyCommand(raftNode *RaftNode) *ApplyCommand {
-	return &ApplyCommand{raft: raftNode}
+func NewApplyCommand(raftNode *RaftNode, applyTimeout time.Duration) *ApplyCommand {
+	return &ApplyCommand{
+		raft:         raftNode,
+		applyTimeout: applyTimeout,
+	}
 }
 
 // SubmitJob submits a new job to the cluster
@@ -36,7 +40,7 @@ func (a *ApplyCommand) SubmitJob(j *job.Job) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // AssignJob assigns a job to a worker
@@ -59,7 +63,7 @@ func (a *ApplyCommand) AssignJob(jobID, workerID string) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // UnassignJob unassigns a job from a worker (rollback operation)
@@ -81,7 +85,7 @@ func (a *ApplyCommand) UnassignJob(jobID string) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // CompleteJob marks a job as completed
@@ -104,7 +108,7 @@ func (a *ApplyCommand) CompleteJob(jobID string, result *job.Result) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // FailJob marks a job as failed
@@ -127,7 +131,7 @@ func (a *ApplyCommand) FailJob(jobID, errorMsg string) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // RetryJob resets a job for retry after worker failure
@@ -149,7 +153,7 @@ func (a *ApplyCommand) RetryJob(jobID string) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // MoveToDLQ moves a job to the dead letter queue
@@ -172,7 +176,7 @@ func (a *ApplyCommand) MoveToDLQ(jobID, reason string) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // RetryFromDLQ retries a job from the dead letter queue
@@ -194,7 +198,7 @@ func (a *ApplyCommand) RetryFromDLQ(jobID string) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // RegisterWorker registers a new worker
@@ -214,7 +218,7 @@ func (a *ApplyCommand) RegisterWorker(worker *storage.WorkerInfo) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }
 
 // RemoveWorker removes a worker from the cluster
@@ -234,5 +238,5 @@ func (a *ApplyCommand) RemoveWorker(workerID string) error {
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	return a.raft.Apply(cmdBytes, 10*time.Second)
+	return a.raft.Apply(cmdBytes, a.applyTimeout)
 }

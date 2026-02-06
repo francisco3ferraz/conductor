@@ -39,7 +39,18 @@ type JobFilter struct {
 	Offset          int
 }
 
-// WorkerInfo holds information about a registered worker
+// WorkerInfo holds information about a registered worker.
+//
+// ARCHITECTURAL NOTE: This struct is duplicated in worker.WorkerInfo with slight
+// differences. This is intentional for layer separation:
+//
+//   - storage.WorkerInfo: Persistence layer with int64 timestamp for efficient BoltDB
+//     serialization and database operations.
+//
+//   - worker.WorkerInfo: In-memory representation with time.Time for fast time-based
+//     operations in scheduling and health monitoring.
+//
+// Conversion is handled via worker.WorkerInfo.ToStorageWorkerInfo() method.
 type WorkerInfo struct {
 	ID                string
 	Address           string
@@ -47,4 +58,19 @@ type WorkerInfo struct {
 	ActiveJobs        int
 	LastHeartbeat     int64 // Unix timestamp
 	Status            string
+}
+
+// Clone creates a deep copy of WorkerInfo for snapshot purposes
+func (w *WorkerInfo) Clone() *WorkerInfo {
+	if w == nil {
+		return nil
+	}
+	return &WorkerInfo{
+		ID:                w.ID,
+		Address:           w.Address,
+		MaxConcurrentJobs: w.MaxConcurrentJobs,
+		ActiveJobs:        w.ActiveJobs,
+		LastHeartbeat:     w.LastHeartbeat,
+		Status:            w.Status,
+	}
 }

@@ -50,7 +50,7 @@ func NewMasterServer(raftNode *consensus.RaftNode, fsm *consensus.FSM, cfg *conf
 	return &MasterServer{
 		raftNode:  raftNode,
 		fsm:       fsm,
-		applier:   consensus.NewApplyCommand(raftNode),
+		applier:   consensus.NewApplyCommand(raftNode, cfg.Raft.ApplyTimeout),
 		forwarder: NewClientForwarder(logger),
 		cfg:       cfg,
 		logger:    logger,

@@ -3,6 +3,7 @@ package consensus_test
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"testing"
 
 	"github.com/francisco3ferraz/conductor/internal/consensus"
@@ -13,7 +14,7 @@ import (
 
 func TestSnapshotCompression(t *testing.T) {
 	logger := zap.NewNop()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 
 	// Create snapshot (even with empty state, it should be compressed)
 	snapshot, err := fsm.CreateSnapshot()
@@ -45,7 +46,7 @@ func TestSnapshotRestoreCompressed(t *testing.T) {
 	logger := zap.NewNop()
 
 	// Create original FSM
-	fsm1 := consensus.NewFSM(logger)
+	fsm1 := consensus.NewFSM(context.Background(), logger)
 
 	// Create snapshot
 	snapshot, err := fsm1.CreateSnapshot()
@@ -57,7 +58,7 @@ func TestSnapshotRestoreCompressed(t *testing.T) {
 	require.NoError(t, err)
 
 	// Restore to new FSM
-	fsm2 := consensus.NewFSM(logger)
+	fsm2 := consensus.NewFSM(context.Background(), logger)
 	readCloser := &mockReadCloser{Reader: bytes.NewReader(mockSink.buf.Bytes())}
 	err = fsm2.RestoreFromSnapshot(readCloser)
 	require.NoError(t, err)

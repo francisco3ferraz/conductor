@@ -74,3 +74,9 @@ security:
     server_name: conductor-raft-staging.svc
     skip_verify: false
     auto_generate: false
+  rate_limit:
+    enabled: true
+    requests_per_sec: 50   # 50 req/s per client
+    burst: 25
+    cleanup_interval: 5m
+    client_ttl: 30m

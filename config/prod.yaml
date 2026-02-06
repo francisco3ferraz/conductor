@@ -74,3 +74,9 @@ security:
     server_name: conductor-raft.production.svc
     skip_verify: false
     auto_generate: false
+  rate_limit:
+    enabled: true
+    requests_per_sec: 100  # 100 req/s per client (conservative for production)
+    burst: 50
+    cleanup_interval: 10m  # Longer cleanup in production
+    client_ttl: 1h         # Longer TTL in production

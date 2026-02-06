@@ -36,7 +36,7 @@ func testConfig() *config.Config {
 
 func TestScheduler_NewScheduler(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
@@ -50,7 +50,7 @@ func TestScheduler_NewScheduler(t *testing.T) {
 
 func TestScheduler_RegisterWorker(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
@@ -68,7 +68,7 @@ func TestScheduler_RegisterWorker(t *testing.T) {
 
 func TestScheduler_ListWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
@@ -93,7 +93,7 @@ func TestScheduler_ListWorkers(t *testing.T) {
 
 func TestScheduler_UpdateHeartbeat(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
@@ -119,7 +119,7 @@ func TestScheduler_UpdateHeartbeat(t *testing.T) {
 
 func TestScheduler_RemoveWorker(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
@@ -135,7 +135,7 @@ func TestScheduler_RemoveWorker(t *testing.T) {
 
 func TestScheduler_CheckWorkerHealth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
@@ -165,7 +165,7 @@ func TestScheduler_CheckWorkerHealth(t *testing.T) {
 
 func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
@@ -222,7 +222,7 @@ func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 
 func TestScheduler_SchedulePendingJobs_NoWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
@@ -235,7 +235,7 @@ func TestScheduler_SchedulePendingJobs_NoWorkers(t *testing.T) {
 
 func TestScheduler_Stop(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
@@ -245,7 +245,7 @@ func TestScheduler_Stop(t *testing.T) {
 
 func TestScheduler_PolicyIgnoresInactiveWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(logger)
+	fsm := consensus.NewFSM(context.Background(), logger)
 	cfg := testConfig()
 	scheduler := NewScheduler(nil, fsm, cfg, logger)
 
