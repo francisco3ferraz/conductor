@@ -85,6 +85,10 @@ func (e *Executor) Execute(ctx context.Context, j *job.Job) *job.Result {
 	case job.TypeDataAnalysis:
 		span.AddEvent("executing_data_analysis")
 		result = e.executeDataAnalysis(jobCtx, j)
+	case job.TypeTestSleep:
+		span.AddEvent("executing_sleep")
+		time.Sleep(30 * time.Second)
+		result = &job.Result{Success: true}
 	default:
 		span.AddEvent("unknown_job_type")
 		result = job.NewErrorResult(fmt.Errorf("unknown job type: %s", j.Type), 0)

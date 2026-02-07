@@ -2,7 +2,6 @@ package security
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -147,6 +146,20 @@ func NewRBAC(config *RBACConfig, logger *zap.Logger) *RBAC {
 	rbac.RegisterRole(RoleViewer)
 	rbac.RegisterRole(RoleWorker)
 
+	// Register roles from loaded policies (overriding defaults if names match)
+	for _, roleDef := range policyManager.GetRoles() {
+		permissions := make([]Permission, len(roleDef.Permissions))
+		for i, p := range roleDef.Permissions {
+			permissions[i] = Permission(p)
+		}
+
+		role := Role{
+			Name:        roleDef.Name,
+			Permissions: permissions,
+		}
+		rbac.RegisterRole(role)
+	}
+
 	return rbac
 }
 
@@ -230,17 +243,31 @@ func (r *RBAC) DefinePolicy(method string, permissions []Permission) {
 }
 
 // CheckPermission checks if a user has required permissions for a method
-func (r *RBAC) CheckPermission(userID string, method string) error {
+func (r *RBAC) CheckPermission(userID string, method string, tokenRoles []string) error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Get user
-	user, ok := r.users[userID]
-	if !ok {
-		return errors.New("user not found")
+	// Resolve user (from DB or transparently from token roles)
+	var user *User
+	if u, ok := r.users[userID]; ok {
+		user = u
+	} else if len(tokenRoles) > 0 {
+		// Create transient user from token roles
+		var roles []Role
+		for _, roleName := range tokenRoles {
+			if role, ok := r.roles[roleName]; ok {
+				roles = append(roles, role)
+			}
+		}
+		user = &User{
+			ID:    userID,
+			Roles: roles,
+		}
+	} else {
+		// User not found in DB and no roles provided
+		// Note: We don't return "user not found" yet, because the method might be public (no policy)
 	}
 
-	// Get required permissions for method
 	// Get required permissions from policy manager
 	requiredPerms, ok := r.policyManager.GetMethodPermissions(method)
 	if !ok {
@@ -253,6 +280,10 @@ func (r *RBAC) CheckPermission(userID string, method string) error {
 			zap.String("method", method),
 			zap.String("user_id", userID))
 		return fmt.Errorf("no RBAC policy defined for method %s", method)
+	}
+
+	if user == nil {
+		return fmt.Errorf("user not found: %s", userID)
 	}
 
 	// Check if user has any of the required permissions
@@ -352,11 +383,13 @@ func (r *RBAC) RBACInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		userID := userIDs[0]
+		userRoles := md.Get("user-roles")
 
 		// Check permissions
-		if err := r.CheckPermission(userID, info.FullMethod); err != nil {
+		if err := r.CheckPermission(userID, info.FullMethod, userRoles); err != nil {
 			r.auditLogger.Warn("Authorization failed: permission denied",
 				zap.String("user_id", userID),
+				zap.Strings("roles", userRoles),
 				zap.String("method", info.FullMethod),
 				zap.String("client", clientAddr),
 				zap.Error(err),

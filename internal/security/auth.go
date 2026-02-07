@@ -129,7 +129,7 @@ func (am *AuthManager) GenerateToken(userID string, roles []string, expiry time.
 	claims := jwt.MapClaims{
 		"sub":   userID,
 		"iss":   am.config.Issuer,
-		"aud":   am.config.Audience,
+		"aud":   []string{am.config.Audience}, // Array format for RegisteredClaims compatibility
 		"iat":   now.Unix(),
 		"exp":   now.Add(expiry).Unix(),
 		"roles": roles,
@@ -292,6 +292,7 @@ func (am *AuthManager) ValidateToken(tokenString string) (*UserClaims, error) {
 	}
 
 	// Parse token
+	fmt.Printf("DEBUG: Parsing token: %s...\n", tokenString[:10])
 	token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, func(token *jwt.Token) (interface{}, error) {
 		// Validate signing method
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -420,11 +421,16 @@ func (am *AuthManager) AuthInterceptor() grpc.UnaryServerInterceptor {
 			zap.Duration("latency", time.Since(start)),
 		)
 
-		// Add user info to context for downstream handlers
-		ctx = metadata.AppendToOutgoingContext(ctx, "user-id", claims.Subject)
+		// Create new metadata with user info
+		mdCopy := md.Copy()
+		mdCopy.Set("user-id", claims.Subject)
 		if len(claims.Roles) > 0 {
-			ctx = metadata.AppendToOutgoingContext(ctx, "user-roles", claims.Roles[0])
+			// Pass all roles
+			mdCopy.Set("user-roles", claims.Roles...)
 		}
+
+		// Update context with new incoming metadata
+		ctx = metadata.NewIncomingContext(ctx, mdCopy)
 
 		return handler(ctx, req)
 	}

@@ -23,6 +23,15 @@ func main() {
 	jobType := flag.String("type", "image_processing", "Job type")
 	payload := flag.String("payload", "test data", "Job payload")
 	timeoutSeconds := flag.Int64("timeout", 0, "Job timeout in seconds (0 = no timeout)")
+
+	// Security flags
+	caCert := flag.String("ca-cert", "", "Path to CA certificate")
+	certFile := flag.String("cert", "", "Path to client certificate")
+	keyFile := flag.String("key", "", "Path to client key")
+	insecureSkipVerify := flag.Bool("insecure-skip-verify", false, "Skip TLS verification")
+
+	token := flag.String("token", "", "JWT Bearer token")
+
 	flag.Parse()
 
 	// Initialize distributed tracing
@@ -40,8 +49,17 @@ func main() {
 		defer tracingShutdown()
 	}
 
+	// Create client options
+	var opts []client.ClientOption
+	if *caCert != "" || *certFile != "" || *keyFile != "" || *insecureSkipVerify {
+		opts = append(opts, client.WithTLS(*caCert, *certFile, *keyFile, *insecureSkipVerify))
+	}
+	if *token != "" {
+		opts = append(opts, client.WithToken(*token))
+	}
+
 	// Create client
-	c, err := client.NewClient(*addr)
+	c, err := client.NewClient(*addr, opts...)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}

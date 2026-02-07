@@ -10,6 +10,7 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/worker"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -28,10 +29,35 @@ type WorkerClient struct {
 	totalFailed    int32
 }
 
-// NewWorkerClient creates a new worker client
-func NewWorkerClient(workerID, masterAddr string, executor *worker.Executor, logger *zap.Logger) (*WorkerClient, error) {
+// NewWorkerClient creates a new worker client with optional TLS and JWT credentials
+// If tlsCreds is nil, insecure connection is used
+// If jwtToken is non-empty, JWT authentication is enabled
+func NewWorkerClient(workerID, masterAddr string, executor *worker.Executor, logger *zap.Logger, tlsCreds credentials.TransportCredentials, jwtToken string) (*WorkerClient, error) {
+	// Build dial options
+	var dialOpts []grpc.DialOption
+
+	// Determine transport credentials
+	if tlsCreds != nil {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(tlsCreds))
+		logger.Info("Using TLS for master connection")
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		logger.Warn("Using insecure connection to master - NOT FOR PRODUCTION")
+	}
+
+	// Add JWT credentials if token provided
+	if jwtToken != "" {
+		// Allow insecure only when TLS is not enabled (dev mode)
+		allowInsecure := tlsCreds == nil
+		jwtCreds := NewJWTCredentials(jwtToken, allowInsecure)
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(jwtCreds))
+		logger.Info("JWT authentication enabled for master connection")
+	} else {
+		logger.Warn("No JWT token provided - requests may be rejected by RBAC")
+	}
+
 	// Connect to master
-	conn, err := grpc.NewClient(masterAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(masterAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to master: %w", err)
 	}

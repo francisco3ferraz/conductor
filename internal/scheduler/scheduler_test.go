@@ -8,7 +8,9 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/consensus"
 	"github.com/francisco3ferraz/conductor/internal/job"
+	"github.com/francisco3ferraz/conductor/internal/metrics"
 	"github.com/francisco3ferraz/conductor/internal/worker"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -36,10 +38,11 @@ func testConfig() *config.Config {
 
 func TestScheduler_NewScheduler(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
 
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	assert.NotNil(t, scheduler)
 	assert.NotNil(t, scheduler.registry)
@@ -50,9 +53,10 @@ func TestScheduler_NewScheduler(t *testing.T) {
 
 func TestScheduler_RegisterWorker(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Register directly in registry (RegisterWorker method requires Raft)
 	scheduler.registry.Register("worker-test", "localhost:9999", 5)
@@ -68,9 +72,10 @@ func TestScheduler_RegisterWorker(t *testing.T) {
 
 func TestScheduler_ListWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Register multiple workers directly in registry
 	scheduler.registry.Register("worker-1", "localhost:9001", 10)
@@ -93,9 +98,10 @@ func TestScheduler_ListWorkers(t *testing.T) {
 
 func TestScheduler_UpdateHeartbeat(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Register worker directly
 	scheduler.registry.Register("worker-1", "localhost:9001", 10)
@@ -119,9 +125,10 @@ func TestScheduler_UpdateHeartbeat(t *testing.T) {
 
 func TestScheduler_RemoveWorker(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Register and then remove (use registry directly to avoid Raft calls)
 	scheduler.registry.Register("worker-remove", "localhost:9999", 5)
@@ -135,9 +142,10 @@ func TestScheduler_RemoveWorker(t *testing.T) {
 
 func TestScheduler_CheckWorkerHealth(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Register workers directly
 	scheduler.registry.Register("worker-1", "localhost:9001", 10)
@@ -165,9 +173,10 @@ func TestScheduler_CheckWorkerHealth(t *testing.T) {
 
 func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Set to LeastLoaded policy for predictable testing
 	scheduler.SetSchedulingPolicy(NewLeastLoadedPolicy())
@@ -222,9 +231,10 @@ func TestScheduler_PolicyBasedWorkerSelection(t *testing.T) {
 
 func TestScheduler_SchedulePendingJobs_NoWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Schedule without workers - should not crash
 	ctx := context.Background()
@@ -235,9 +245,10 @@ func TestScheduler_SchedulePendingJobs_NoWorkers(t *testing.T) {
 
 func TestScheduler_Stop(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Stop should not panic
 	scheduler.Stop()
@@ -245,9 +256,10 @@ func TestScheduler_Stop(t *testing.T) {
 
 func TestScheduler_PolicyIgnoresInactiveWorkers(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetrics("test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 	cfg := testConfig()
-	scheduler := NewScheduler(nil, fsm, cfg, logger)
+	scheduler := NewScheduler(context.Background(), nil, fsm, cfg, m, logger)
 
 	// Register workers
 	scheduler.registry.Register("worker-active", "localhost:9001", 10)

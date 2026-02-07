@@ -46,7 +46,9 @@ func (w *WorkerServer) AssignJob(ctx context.Context, req *proto.AssignJobReques
 	j := protoToJob(req.Job)
 
 	// Enqueue job for priority-based execution
-	w.jobQueue.Enqueue(ctx, j)
+	// Use background context for job execution - the gRPC request context
+	// will be cancelled when AssignJob returns, but jobs need to run longer
+	w.jobQueue.Enqueue(context.Background(), j)
 
 	return &proto.AssignJobResponse{
 		Accepted: true,

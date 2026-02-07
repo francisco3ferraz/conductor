@@ -49,11 +49,18 @@ type Metrics struct {
 	RateLimitHits *prometheus.CounterVec
 }
 
-// NewMetrics creates and registers all Prometheus metrics
+// NewMetrics creates and registers all Prometheus metrics with the default registerer
 func NewMetrics(namespace string) *Metrics {
+	return NewMetricsWithRegistry(prometheus.DefaultRegisterer, namespace)
+}
+
+// NewMetricsWithRegistry creates and registers all Prometheus metrics with a specific registerer
+func NewMetricsWithRegistry(reg prometheus.Registerer, namespace string) *Metrics {
+	factory := promauto.With(reg)
+
 	m := &Metrics{
 		// Job metrics
-		JobsTotal: promauto.NewCounterVec(
+		JobsTotal: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "jobs_total",
@@ -61,7 +68,7 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"type", "status"},
 		),
-		JobDuration: promauto.NewHistogramVec(
+		JobDuration: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: namespace,
 				Name:      "job_duration_seconds",
@@ -70,14 +77,14 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"type", "status"},
 		),
-		JobsActive: promauto.NewGauge(
+		JobsActive: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "jobs_active",
 				Help:      "Number of currently running jobs",
 			},
 		),
-		JobRetries: promauto.NewCounterVec(
+		JobRetries: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "job_retries_total",
@@ -85,14 +92,14 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"type"},
 		),
-		JobQueueSize: promauto.NewGauge(
+		JobQueueSize: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "job_queue_size",
 				Help:      "Number of jobs waiting to be assigned",
 			},
 		),
-		JobsInDLQ: promauto.NewGauge(
+		JobsInDLQ: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "jobs_dlq_total",
@@ -101,28 +108,28 @@ func NewMetrics(namespace string) *Metrics {
 		),
 
 		// Worker metrics
-		WorkersRegistered: promauto.NewGauge(
+		WorkersRegistered: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "workers_registered",
 				Help:      "Number of registered workers",
 			},
 		),
-		WorkersActive: promauto.NewGauge(
+		WorkersActive: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "workers_active",
 				Help:      "Number of active workers",
 			},
 		),
-		WorkersFailed: promauto.NewGauge(
+		WorkersFailed: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "workers_failed",
 				Help:      "Number of failed workers",
 			},
 		),
-		WorkerHeartbeats: promauto.NewCounterVec(
+		WorkerHeartbeats: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "worker_heartbeats_total",
@@ -130,7 +137,7 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"worker_id", "status"},
 		),
-		WorkerJobCapacity: promauto.NewGaugeVec(
+		WorkerJobCapacity: factory.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "worker_job_capacity",
@@ -140,7 +147,7 @@ func NewMetrics(namespace string) *Metrics {
 		),
 
 		// Scheduler metrics
-		SchedulingAttempts: promauto.NewCounterVec(
+		SchedulingAttempts: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "scheduling_attempts_total",
@@ -148,7 +155,7 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"policy", "result"},
 		),
-		SchedulingLatency: promauto.NewHistogram(
+		SchedulingLatency: factory.NewHistogram(
 			prometheus.HistogramOpts{
 				Namespace: namespace,
 				Name:      "scheduling_latency_seconds",
@@ -156,7 +163,7 @@ func NewMetrics(namespace string) *Metrics {
 				Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
 			},
 		),
-		AssignmentFailures: promauto.NewCounterVec(
+		AssignmentFailures: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "assignment_failures_total",
@@ -166,7 +173,7 @@ func NewMetrics(namespace string) *Metrics {
 		),
 
 		// Raft metrics
-		RaftApplies: promauto.NewCounterVec(
+		RaftApplies: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "raft_applies_total",
@@ -174,7 +181,7 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"command", "status"},
 		),
-		RaftApplyLatency: promauto.NewHistogram(
+		RaftApplyLatency: factory.NewHistogram(
 			prometheus.HistogramOpts{
 				Namespace: namespace,
 				Name:      "raft_apply_latency_seconds",
@@ -182,14 +189,14 @@ func NewMetrics(namespace string) *Metrics {
 				Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2, 5},
 			},
 		),
-		RaftSnapshots: promauto.NewCounter(
+		RaftSnapshots: factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "raft_snapshots_total",
 				Help:      "Total number of Raft snapshots created",
 			},
 		),
-		RaftIsLeader: promauto.NewGauge(
+		RaftIsLeader: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "raft_is_leader",
@@ -198,7 +205,7 @@ func NewMetrics(namespace string) *Metrics {
 		),
 
 		// RPC metrics
-		RPCRequests: promauto.NewCounterVec(
+		RPCRequests: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "rpc_requests_total",
@@ -206,7 +213,7 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"method", "status"},
 		),
-		RPCLatency: promauto.NewHistogramVec(
+		RPCLatency: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: namespace,
 				Name:      "rpc_latency_seconds",
@@ -215,7 +222,7 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"method"},
 		),
-		RPCErrors: promauto.NewCounterVec(
+		RPCErrors: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "rpc_errors_total",
@@ -225,7 +232,7 @@ func NewMetrics(namespace string) *Metrics {
 		),
 
 		// Recovery metrics
-		RecoveryAttempts: promauto.NewCounterVec(
+		RecoveryAttempts: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "recovery_attempts_total",
@@ -233,21 +240,21 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"reason"},
 		),
-		RecoverySuccesses: promauto.NewCounter(
+		RecoverySuccesses: factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "recovery_successes_total",
 				Help:      "Total number of successful job recoveries",
 			},
 		),
-		RecoveryFailures: promauto.NewCounter(
+		RecoveryFailures: factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "recovery_failures_total",
 				Help:      "Total number of failed job recoveries",
 			},
 		),
-		DLQMovements: promauto.NewCounter(
+		DLQMovements: factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "dlq_movements_total",
@@ -256,7 +263,7 @@ func NewMetrics(namespace string) *Metrics {
 		),
 
 		// Security metrics
-		AuthAttempts: promauto.NewCounterVec(
+		AuthAttempts: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "auth_attempts_total",
@@ -264,7 +271,7 @@ func NewMetrics(namespace string) *Metrics {
 			},
 			[]string{"result"},
 		),
-		RateLimitHits: promauto.NewCounterVec(
+		RateLimitHits: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "rate_limit_hits_total",

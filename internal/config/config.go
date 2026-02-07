@@ -198,23 +198,24 @@ func Load(configPath string) (*Config, error) {
 			configFile = "prod.yaml"
 		}
 
-		profileConfigPath := fmt.Sprintf("./config/%s", configFile)
-		v.SetConfigFile(profileConfigPath)
+		configPath = fmt.Sprintf("./config/%s", configFile)
+	}
 
-		if err := v.ReadInConfig(); err != nil {
-			// Config file not found is OK - we'll use defaults and env vars
-			// Check for both viper's error type and os.PathError
-			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-				if !os.IsNotExist(err) {
-					return nil, fmt.Errorf("error reading config file '%s': %w", profileConfigPath, err)
-				}
-			}
+	// Read and expand configuration file
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		// Only ignore if it's the auto-discovered path and it doesn't exist
+		if os.IsNotExist(err) && configPath == fmt.Sprintf("./config/%s", "dev.yaml") {
+			// Fallback to defaults
+		} else {
+			return nil, fmt.Errorf("failed to read config file '%s': %w", configPath, err)
 		}
 	} else {
-		// Use explicitly provided config file
-		v.SetConfigFile(configPath)
-		if err := v.ReadInConfig(); err != nil {
-			return nil, fmt.Errorf("failed to read config file '%s': %w", configPath, err)
+		// Expand environment variables
+		expandedContent := os.ExpandEnv(string(content))
+		v.SetConfigType("yaml")
+		if err := v.ReadConfig(strings.NewReader(expandedContent)); err != nil {
+			return nil, fmt.Errorf("failed to parse config file '%s': %w", configPath, err)
 		}
 	}
 

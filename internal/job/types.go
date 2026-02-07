@@ -9,6 +9,7 @@ const (
 	TypeImageProcessing Type = iota
 	TypeWebScraping
 	TypeDataAnalysis
+	TypeTestSleep
 )
 
 // String returns the string representation of the job type
@@ -20,6 +21,8 @@ func (t Type) String() string {
 		return "web_scraping"
 	case TypeDataAnalysis:
 		return "data_analysis"
+	case TypeTestSleep:
+		return "test_sleep"
 	default:
 		return "unknown"
 	}
@@ -34,6 +37,8 @@ func ParseType(s string) (Type, error) {
 		return TypeWebScraping, nil
 	case "data_analysis":
 		return TypeDataAnalysis, nil
+	case "test_sleep":
+		return TypeTestSleep, nil
 	default:
 		return 0, fmt.Errorf("unknown job type: %s", s)
 	}

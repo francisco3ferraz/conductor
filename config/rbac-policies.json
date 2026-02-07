@@ -44,34 +44,53 @@
   ],
   "policies": [
     {
-      "method": "/scheduler.Scheduler/SubmitJob",
-      "permissions": ["job:submit"],
+      "method": "/proto.MasterService/SubmitJob",
+      "permissions": [
+        "job:submit"
+      ],
       "description": "Submit a new job to the scheduler"
     },
     {
-      "method": "/scheduler.Scheduler/GetJobStatus",
-      "permissions": ["job:view"],
+      "method": "/proto.MasterService/GetJobStatus",
+      "permissions": [
+        "job:view"
+      ],
       "description": "Query job status"
     },
     {
-      "method": "/scheduler.Scheduler/CancelJob",
-      "permissions": ["job:cancel"],
+      "method": "/proto.MasterService/CancelJob",
+      "permissions": [
+        "job:cancel"
+      ],
       "description": "Cancel a running or pending job"
     },
     {
-      "method": "/worker.Worker/RegisterWorker",
-      "permissions": ["worker:register"],
+      "method": "/proto.MasterService/RegisterWorker",
+      "permissions": [
+        "worker:register"
+      ],
       "description": "Register a new worker with the cluster"
     },
     {
-      "method": "/worker.Worker/Heartbeat",
-      "permissions": ["worker:register"],
+      "method": "/proto.MasterService/Heartbeat",
+      "permissions": [
+        "worker:register"
+      ],
       "description": "Send worker heartbeat"
     },
     {
-      "method": "/scheduler.Scheduler/ListWorkers",
-      "permissions": ["worker:view"],
-      "description": "List all registered workers"
+      "method": "/proto.MasterService/ListJobs",
+      "permissions": [
+        "job:view"
+      ],
+      "description": "List all jobs"
+    },
+    {
+      "method": "/proto.MasterService/ReportResult",
+      "permissions": [
+        "job:view"
+      ],
+      "description": "Report job execution result"
     }
   ]
 }

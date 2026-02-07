@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/francisco3ferraz/conductor/internal/consensus"
+	"github.com/francisco3ferraz/conductor/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -14,7 +16,8 @@ import (
 
 func TestSnapshotCompression(t *testing.T) {
 	logger := zap.NewNop()
-	fsm := consensus.NewFSM(context.Background(), logger)
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm := consensus.NewFSM(context.Background(), m, logger)
 
 	// Create snapshot (even with empty state, it should be compressed)
 	snapshot, err := fsm.CreateSnapshot()
@@ -46,7 +49,9 @@ func TestSnapshotRestoreCompressed(t *testing.T) {
 	logger := zap.NewNop()
 
 	// Create original FSM
-	fsm1 := consensus.NewFSM(context.Background(), logger)
+	// Create original FSM
+	m := metrics.NewMetricsWithRegistry(prometheus.NewRegistry(), "test")
+	fsm1 := consensus.NewFSM(context.Background(), m, logger)
 
 	// Create snapshot
 	snapshot, err := fsm1.CreateSnapshot()
@@ -58,7 +63,8 @@ func TestSnapshotRestoreCompressed(t *testing.T) {
 	require.NoError(t, err)
 
 	// Restore to new FSM
-	fsm2 := consensus.NewFSM(context.Background(), logger)
+	// Restore to new FSM
+	fsm2 := consensus.NewFSM(context.Background(), m, logger)
 	readCloser := &mockReadCloser{Reader: bytes.NewReader(mockSink.buf.Bytes())}
 	err = fsm2.RestoreFromSnapshot(readCloser)
 	require.NoError(t, err)

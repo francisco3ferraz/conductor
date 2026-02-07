@@ -14,9 +14,11 @@ import (
 	"github.com/francisco3ferraz/conductor/internal/config"
 	"github.com/francisco3ferraz/conductor/internal/job"
 	"github.com/francisco3ferraz/conductor/internal/rpc"
+	"github.com/francisco3ferraz/conductor/internal/security"
 	"github.com/francisco3ferraz/conductor/internal/tracing"
 	"github.com/francisco3ferraz/conductor/internal/worker"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -112,15 +114,64 @@ func main() {
 		zap.Int("max_jobs", cfg.Worker.MaxConcurrentJobs),
 	)
 
+	// Load TLS credentials for connecting to master (if TLS is enabled)
+	var tlsCreds credentials.TransportCredentials
+	if cfg.Security.TLS.Enabled {
+		tlsConfig := &security.TLSConfig{
+			Enabled:      cfg.Security.TLS.Enabled,
+			CertFile:     cfg.Security.TLS.CertFile,
+			KeyFile:      cfg.Security.TLS.KeyFile,
+			CAFile:       cfg.Security.TLS.CAFile,
+			ServerName:   cfg.Security.TLS.ServerName,
+			SkipVerify:   cfg.Security.TLS.SkipVerify,
+			AutoGenerate: cfg.Security.TLS.AutoGenerate,
+		}
+		certManager := security.NewCertManager(tlsConfig, logger)
+		tlsCreds, err = certManager.LoadOrGenerateClientTLS()
+		if err != nil {
+			logger.Fatal("Failed to load TLS credentials", zap.Error(err))
+		}
+		logger.Info("TLS enabled for master connection",
+			zap.String("server_name", cfg.Security.TLS.ServerName),
+			zap.Bool("skip_verify", cfg.Security.TLS.SkipVerify),
+		)
+	}
+
+	// Generate JWT token for worker authentication (if RBAC is enabled)
+	var jwtToken string
+	if cfg.Security.RBAC.Enabled && cfg.Security.JWT.SecretKey != "" {
+		// Create auth manager for token generation
+		authConfig := &security.JWTConfig{
+			SecretKey:      cfg.Security.JWT.SecretKey,
+			Issuer:         cfg.Security.JWT.Issuer,
+			Audience:       cfg.Security.JWT.Audience,
+			AccessTokenTTL: cfg.Security.JWT.AccessTokenTTL,
+		}
+		authManager := security.NewAuthManager(authConfig, logger)
+
+		// Generate token with worker role
+		var err error
+		jwtToken, err = authManager.GenerateToken(cfg.Worker.WorkerID, []string{"worker"}, 24*time.Hour)
+		if err != nil {
+			logger.Fatal("Failed to generate JWT token", zap.Error(err))
+		}
+		logger.Info("Generated JWT token for worker authentication",
+			zap.String("worker_id", cfg.Worker.WorkerID),
+			zap.Strings("roles", []string{"worker"}),
+		)
+	}
+
 	// Create job executor
 	exec := worker.NewExecutor(cfg.Worker.WorkerID, logger)
 
-	// Create worker client
+	// Create worker client with TLS and JWT credentials
 	workerClient, err := rpc.NewWorkerClient(
 		cfg.Worker.WorkerID,
 		cfg.Worker.MasterAddr,
 		exec,
 		logger,
+		tlsCreds, // nil for insecure, or valid credentials for TLS
+		jwtToken, // empty for no auth, or valid JWT for RBAC
 	)
 	if err != nil {
 		logger.Fatal("Failed to create worker client", zap.Error(err))

@@ -2,12 +2,16 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"time"
 
 	proto "github.com/francisco3ferraz/conductor/api/proto"
 	"github.com/francisco3ferraz/conductor/internal/rpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -17,13 +21,119 @@ type Client struct {
 	client proto.MasterServiceClient
 }
 
-// NewClient creates a new Conductor client
-func NewClient(masterAddr string) (*Client, error) {
-	// Get tracing-enabled client interceptors
-	clientOpts := rpc.GetClientInterceptors()
-	clientOpts = append(clientOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// ClientOption defines a functional option for configuring the client
+type ClientOption func(*clientOptions)
 
-	conn, err := grpc.NewClient(masterAddr, clientOpts...)
+type clientOptions struct {
+	dialOptions []grpc.DialOption
+	tlsConfig   *tlsConfig
+	token       string
+}
+
+type tlsConfig struct {
+	enabled    bool
+	caFile     string
+	certFile   string
+	keyFile    string
+	skipVerify bool
+}
+
+// WithToken adds a Bearer token to requests
+func WithToken(token string) ClientOption {
+	return func(o *clientOptions) {
+		o.token = token
+	}
+}
+
+// WithTLS enables TLS with the provided configuration
+func WithTLS(caFile, certFile, keyFile string, skipVerify bool) ClientOption {
+	return func(o *clientOptions) {
+		o.tlsConfig = &tlsConfig{
+			enabled:    true,
+			caFile:     caFile,
+			certFile:   certFile,
+			keyFile:    keyFile,
+			skipVerify: skipVerify,
+		}
+	}
+}
+
+// WithDialOptions adds custom gRPC dial options
+func WithDialOptions(opts ...grpc.DialOption) ClientOption {
+	return func(o *clientOptions) {
+		o.dialOptions = append(o.dialOptions, opts...)
+	}
+}
+
+// NewClient creates a new Conductor client
+func NewClient(masterAddr string, opts ...ClientOption) (*Client, error) {
+	// Default options
+	options := &clientOptions{
+		dialOptions: rpc.GetClientInterceptors(),
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	// Configure TLS if enabled
+	if options.tlsConfig != nil && options.tlsConfig.enabled {
+		var creds credentials.TransportCredentials
+		var err error
+
+		if options.tlsConfig.caFile != "" && options.tlsConfig.certFile != "" && options.tlsConfig.keyFile != "" {
+			// mTLS
+			cert, err := tls.LoadX509KeyPair(options.tlsConfig.certFile, options.tlsConfig.keyFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load client cert/key: %w", err)
+			}
+
+			caCert, err := os.ReadFile(options.tlsConfig.caFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA cert: %w", err)
+			}
+
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to append CA cert to pool")
+			}
+
+			tlsConfig := &tls.Config{
+				Certificates:       []tls.Certificate{cert},
+				RootCAs:            caCertPool,
+				InsecureSkipVerify: options.tlsConfig.skipVerify,
+			}
+			creds = credentials.NewTLS(tlsConfig)
+		} else if options.tlsConfig.caFile != "" {
+			// TLS with custom CA (no client auth)
+			creds, err = credentials.NewClientTLSFromFile(options.tlsConfig.caFile, "")
+			if err != nil {
+				return nil, fmt.Errorf("failed to load CA cert: %w", err)
+			}
+		} else {
+			// System TLS
+			creds = credentials.NewTLS(&tls.Config{
+				InsecureSkipVerify: options.tlsConfig.skipVerify,
+			})
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to create TLS credentials: %w", err)
+		}
+
+		options.dialOptions = append(options.dialOptions, grpc.WithTransportCredentials(creds))
+	} else {
+		// Default to insecure if no TLS config provided
+		options.dialOptions = append(options.dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	// Add token auth if provided
+	if options.token != "" {
+		options.dialOptions = append(options.dialOptions, grpc.WithPerRPCCredentials(tokenAuth{token: options.token}))
+	}
+
+	conn, err := grpc.NewClient(masterAddr, options.dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to master: %w", err)
 	}
@@ -32,6 +142,20 @@ func NewClient(masterAddr string) (*Client, error) {
 		conn:   conn,
 		client: proto.NewMasterServiceClient(conn),
 	}, nil
+}
+
+type tokenAuth struct {
+	token string
+}
+
+func (t tokenAuth) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	return map[string]string{
+		"authorization": "Bearer " + t.token,
+	}, nil
+}
+
+func (t tokenAuth) RequireTransportSecurity() bool {
+	return false // Allow insecure (handled by transport credentials)
 }
 
 // Close closes the connection to the master

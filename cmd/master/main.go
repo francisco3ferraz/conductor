@@ -214,7 +214,7 @@ func main() {
 		rbac = security.NewRBAC(rbacConfig, logger)
 
 		// Define default policies for all endpoints
-		rbac.DefineDefaultPolicies()
+		// rbac.DefineDefaultPolicies()
 
 		// Add default admin user for testing
 		if err := rbac.AddUser("admin", "admin", "admin"); err != nil {
