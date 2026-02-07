@@ -2,7 +2,8 @@
 # Makefile for building, testing, and running the system
 
 .PHONY: all build test clean proto deps lint fmt vet check \
-        run-master run-worker cluster ha-cluster stop help
+        run-master run-worker cluster ha-cluster stop help \
+        docker-build docker-up docker-up-dev docker-down docker-logs docker-clean
 
 # ==============================================================================
 # Configuration
@@ -193,3 +194,35 @@ clean-data: ## Remove only data files (keep binaries)
 	@echo "==> Cleaning data..."
 	@rm -rf $(DATA_DIR)
 	@rm -rf logs/
+
+# ==============================================================================
+# Docker
+# ==============================================================================
+
+docker-build: ## Build Docker images
+	@echo "==> Building Docker images..."
+	@docker build --target master -t conductor-master:latest .
+	@docker build --target worker -t conductor-worker:latest .
+	@docker build --target client -t conductor-client:latest .
+
+docker-up: ## Start HA cluster with Docker Compose
+	@echo "==> Starting Docker HA cluster..."
+	@docker compose up -d
+
+docker-up-dev: ## Start dev cluster with Docker Compose
+	@echo "==> Starting Docker dev cluster..."
+	@docker compose -f docker-compose.dev.yml up -d
+
+docker-down: ## Stop Docker Compose services
+	@echo "==> Stopping Docker services..."
+	@docker compose down
+	@docker compose -f docker-compose.dev.yml down 2>/dev/null || true
+
+docker-logs: ## View Docker Compose logs
+	@docker compose logs -f
+
+docker-clean: docker-down ## Remove Docker images and volumes
+	@echo "==> Cleaning Docker resources..."
+	@docker compose down -v --rmi local 2>/dev/null || true
+	@docker compose -f docker-compose.dev.yml down -v --rmi local 2>/dev/null || true
+
