@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -139,6 +140,27 @@ func main() {
 		TLSConfig:         tlsConfigForRaft,
 	}
 
+	// Initialize auth manager early for join requests
+	authManager := security.NewAuthManager(&security.JWTConfig{
+		SecretKey:       cfg.Security.JWT.SecretKey,
+		Issuer:          cfg.Security.JWT.Issuer,
+		Audience:        cfg.Security.JWT.Audience,
+		SkipExpiry:      cfg.Security.JWT.SkipExpiry,
+		DevelopmentMode: cfg.Profile == config.ProfileDevelopment,
+	}, logger)
+
+	// Initialize CertManager for API server
+	tlsConfig := &security.TLSConfig{
+		Enabled:      cfg.Security.TLS.Enabled,
+		CertFile:     cfg.Security.TLS.CertFile,
+		KeyFile:      cfg.Security.TLS.KeyFile,
+		CAFile:       cfg.Security.TLS.CAFile,
+		ServerName:   cfg.Security.TLS.ServerName,
+		SkipVerify:   cfg.Security.TLS.SkipVerify,
+		AutoGenerate: cfg.Security.TLS.AutoGenerate,
+	}
+	certManager := security.NewCertManager(tlsConfig, logger)
+
 	raftNode, err := consensus.NewRaftNode(raftConfig, fsm, logger)
 	if err != nil {
 		logger.Fatal("Failed to create Raft node", zap.Error(err))
@@ -158,16 +180,36 @@ func main() {
 		)
 
 		// Create gRPC client to join
-		conn, err := grpc.NewClient(cfg.Cluster.JoinAddr,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
+		var opts []grpc.DialOption
+		if cfg.Security.TLS.Enabled {
+			creds, err := certManager.LoadOrGenerateClientTLS()
+			if err != nil {
+				logger.Fatal("Failed to load TLS credentials for join", zap.Error(err))
+			}
+			opts = append(opts, grpc.WithTransportCredentials(creds))
+		} else {
+			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		}
+
+		conn, err := grpc.NewClient(cfg.Cluster.JoinAddr, opts...)
 		if err != nil {
 			logger.Fatal("Failed to connect to cluster", zap.Error(err))
 		}
 		defer conn.Close()
 
 		client := proto.NewMasterServiceClient(conn)
-		resp, err := client.JoinCluster(ctx, &proto.JoinClusterRequest{
+
+		// Generate token for join request (using admin role for cluster management)
+		token, err := authManager.GenerateToken("system-node-"+cfg.Cluster.NodeID, []string{"admin"}, 5*time.Minute)
+		if err != nil {
+			logger.Fatal("Failed to generate token for join", zap.Error(err))
+		}
+
+		// Add token to context
+		md := metadata.Pairs("authorization", "Bearer "+token)
+		authCtx := metadata.NewOutgoingContext(ctx, md)
+
+		resp, err := client.JoinCluster(authCtx, &proto.JoinClusterRequest{
 			NodeId:  cfg.Cluster.NodeID,
 			Address: cfg.Cluster.BindAddr,
 		})
@@ -191,14 +233,7 @@ func main() {
 		logger.Info("Leader elected", zap.String("leader", raftNode.Leader()))
 	}
 
-	// Initialize auth manager
-	authManager := security.NewAuthManager(&security.JWTConfig{
-		SecretKey:       cfg.Security.JWT.SecretKey,
-		Issuer:          cfg.Security.JWT.Issuer,
-		Audience:        cfg.Security.JWT.Audience,
-		SkipExpiry:      cfg.Security.JWT.SkipExpiry,
-		DevelopmentMode: cfg.Profile == config.ProfileDevelopment,
-	}, logger)
+	// Initialize auth manager (already initialized above)
 
 	// Initialize RBAC if enabled
 	var rbac *security.RBAC
@@ -268,15 +303,6 @@ func main() {
 
 	// Load TLS credentials for gRPC if enabled
 	if cfg.Security.TLS.Enabled {
-		tlsConfig := &security.TLSConfig{
-			Enabled:      cfg.Security.TLS.Enabled,
-			CertFile:     cfg.Security.TLS.CertFile,
-			KeyFile:      cfg.Security.TLS.KeyFile,
-			CAFile:       cfg.Security.TLS.CAFile,
-			SkipVerify:   cfg.Security.TLS.SkipVerify,
-			AutoGenerate: cfg.Security.TLS.AutoGenerate,
-		}
-		certManager := security.NewCertManager(tlsConfig, logger)
 		creds, err := certManager.LoadOrGenerateServerTLS()
 		if err != nil {
 			logger.Fatal("Failed to load TLS credentials", zap.Error(err))
@@ -347,11 +373,15 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler(logger))
 	mux.HandleFunc("/ready", readyHandler(logger, store))
-	mux.HandleFunc("/failover/status", failoverStatusHandler(logger, sched))
 	mux.HandleFunc("/cluster/status", clusterStatusHandler(logger, raftNode))
+	mux.HandleFunc("/failover/status", failoverStatusHandler(logger, sched))
 
+	httpPort := cfg.Cluster.HTTPPort
+	if httpPort == 0 {
+		httpPort = 8080
+	}
 	httpServer := &http.Server{
-		Addr:    ":8080",
+		Addr:    fmt.Sprintf(":%d", httpPort),
 		Handler: mux,
 	}
 

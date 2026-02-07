@@ -9,7 +9,6 @@ package proto
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	_ "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -244,7 +243,7 @@ var File_api_proto_worker_proto protoreflect.FileDescriptor
 
 const file_api_proto_worker_proto_rawDesc = "" +
 	"\n" +
-	"\x16api/proto/worker.proto\x12\x05proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19api/proto/scheduler.proto\"M\n" +
+	"\x16api/proto/worker.proto\x12\x05proto\x1a\x19api/proto/scheduler.proto\"M\n" +
 	"\x10AssignJobRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x1c\n" +
 	"\x03job\x18\x02 \x01(\v2\n" +

@@ -91,6 +91,13 @@
         "job:view"
       ],
       "description": "Report job execution result"
+    },
+    {
+      "method": "/proto.MasterService/JoinCluster",
+      "permissions": [
+        "cluster:manage"
+      ],
+      "description": "Join an existing cluster"
     }
   ]
 }

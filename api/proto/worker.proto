@@ -4,7 +4,6 @@ package proto;
 
 option go_package = "github.com/francisco3ferraz/conductor/api/proto";
 
-import "google/protobuf/timestamp.proto";
 import "api/proto/scheduler.proto";
 
 // WorkerService handles job assignment from master to worker

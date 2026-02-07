@@ -63,6 +63,7 @@ type ClusterConfig struct {
 	DataDir   string `mapstructure:"data_dir"`
 	Bootstrap bool   `mapstructure:"bootstrap"`
 	JoinAddr  string `mapstructure:"join_addr"` // Address of existing cluster member to join
+	HTTPPort  int    `mapstructure:"http_port"`
 }
 
 type RaftConfig struct {
@@ -248,28 +249,57 @@ func bindEnvVars(v *viper.Viper) {
 	// Cluster
 	v.BindEnv("cluster.node_id", "NODE_ID")
 	v.BindEnv("cluster.bind_addr", "BIND_ADDR")
+	v.BindEnv("cluster.http_port", "HTTP_PORT")
 	v.BindEnv("cluster.raft_dir", "RAFT_DIR")
 	v.BindEnv("cluster.data_dir", "DATA_DIR")
 	v.BindEnv("cluster.bootstrap", "BOOTSTRAP")
 	v.BindEnv("cluster.join_addr", "JOIN_ADDR")
 
+	// Raft
+	v.BindEnv("raft.heartbeat_timeout", "RAFT_HEARTBEAT_TIMEOUT")
+	v.BindEnv("raft.election_timeout", "RAFT_ELECTION_TIMEOUT")
+	v.BindEnv("raft.barrier_timeout", "RAFT_BARRIER_TIMEOUT")
+	v.BindEnv("raft.snapshot_interval", "RAFT_SNAPSHOT_INTERVAL")
+	v.BindEnv("raft.snapshot_threshold", "RAFT_SNAPSHOT_THRESHOLD")
+	v.BindEnv("raft.apply_timeout", "RAFT_APPLY_TIMEOUT")
+
 	// gRPC
 	v.BindEnv("grpc.master_port", "GRPC_MASTER_PORT")
 	v.BindEnv("grpc.worker_port", "GRPC_WORKER_PORT")
+	v.BindEnv("grpc.max_msg_size", "GRPC_MAX_MSG_SIZE")
+	v.BindEnv("grpc.dial_timeout", "GRPC_DIAL_TIMEOUT")
+	v.BindEnv("grpc.connection_wait", "GRPC_CONNECTION_WAIT")
 
 	// Worker
 	v.BindEnv("worker.worker_id", "WORKER_ID")
 	v.BindEnv("worker.master_addr", "MASTER_ADDR")
+	v.BindEnv("worker.heartbeat_interval", "WORKER_HEARTBEAT_INTERVAL")
+	v.BindEnv("worker.heartbeat_timeout", "WORKER_HEARTBEAT_TIMEOUT")
+	v.BindEnv("worker.result_timeout", "WORKER_RESULT_TIMEOUT")
+	v.BindEnv("worker.max_concurrent_jobs", "WORKER_MAX_CONCURRENT_JOBS")
+	v.BindEnv("worker.shutdown_delay", "WORKER_SHUTDOWN_DELAY")
 
 	// Scheduler
 	v.BindEnv("scheduler.scheduling_policy", "SCHEDULER_POLICY")
 	v.BindEnv("scheduler.job_timeout", "SCHEDULER_JOB_TIMEOUT")
+	v.BindEnv("scheduler.assignment_timeout", "SCHEDULER_ASSIGNMENT_TIMEOUT")
 	v.BindEnv("scheduler.max_retries", "SCHEDULER_MAX_RETRIES")
+	v.BindEnv("scheduler.retry_delay", "SCHEDULER_RETRY_DELAY")
+	v.BindEnv("scheduler.rebalance_interval", "SCHEDULER_REBALANCE_INTERVAL")
+	v.BindEnv("scheduler.max_pending_jobs", "SCHEDULER_MAX_PENDING_JOBS")
 
 	// Logging
 	v.BindEnv("log.level", "LOG_LEVEL")
 	v.BindEnv("log.format", "LOG_FORMAT")
 	v.BindEnv("log.output", "LOG_OUTPUT")
+	v.BindEnv("log.audit_enabled", "LOG_AUDIT_ENABLED")
+	v.BindEnv("log.audit_output", "LOG_AUDIT_OUTPUT")
+
+	// Metrics
+	v.BindEnv("metrics.enabled", "METRICS_ENABLED")
+	v.BindEnv("metrics.port", "METRICS_PORT")
+	v.BindEnv("metrics.path", "METRICS_PATH")
+	v.BindEnv("metrics.collect_interval", "METRICS_COLLECT_INTERVAL")
 
 	// Security - TLS
 	v.BindEnv("security.tls.enabled", "SECURITY_TLS_ENABLED")
@@ -278,11 +308,15 @@ func bindEnvVars(v *viper.Viper) {
 	v.BindEnv("security.tls.cert_file", "SECURITY_TLS_CERT_FILE")
 	v.BindEnv("security.tls.key_file", "SECURITY_TLS_KEY_FILE")
 	v.BindEnv("security.tls.ca_file", "SECURITY_TLS_CA_FILE")
+	v.BindEnv("security.tls.server_name", "SECURITY_TLS_SERVER_NAME")
 
 	// Security - JWT
 	v.BindEnv("security.jwt.secret_key", "JWT_SECRET_KEY")
+	v.BindEnv("security.jwt.public_key_path", "JWT_PUBLIC_KEY_PATH")
 	v.BindEnv("security.jwt.issuer", "JWT_ISSUER")
 	v.BindEnv("security.jwt.audience", "JWT_AUDIENCE")
+	v.BindEnv("security.jwt.access_token_ttl", "JWT_ACCESS_TOKEN_TTL")
+	v.BindEnv("security.jwt.refresh_token_ttl", "JWT_REFRESH_TOKEN_TTL")
 	v.BindEnv("security.jwt.skip_expiry", "JWT_SKIP_EXPIRY")
 
 	// Security - RBAC
@@ -293,9 +327,16 @@ func bindEnvVars(v *viper.Viper) {
 	v.BindEnv("security.rate_limit.enabled", "SECURITY_RATE_LIMIT_ENABLED")
 	v.BindEnv("security.rate_limit.requests_per_sec", "SECURITY_RATE_LIMIT_REQUESTS_PER_SEC")
 	v.BindEnv("security.rate_limit.burst", "SECURITY_RATE_LIMIT_BURST")
+	v.BindEnv("security.rate_limit.cleanup_interval", "SECURITY_RATE_LIMIT_CLEANUP_INTERVAL")
+	v.BindEnv("security.rate_limit.client_ttl", "SECURITY_RATE_LIMIT_CLIENT_TTL")
 
 	// Security - Raft TLS
 	v.BindEnv("security.raft_tls.enabled", "SECURITY_RAFT_TLS_ENABLED")
+	v.BindEnv("security.raft_tls.auto_generate", "SECURITY_RAFT_TLS_AUTO_GENERATE")
+	v.BindEnv("security.raft_tls.skip_verify", "SECURITY_RAFT_TLS_SKIP_VERIFY")
+	v.BindEnv("security.raft_tls.cert_file", "SECURITY_RAFT_TLS_CERT_FILE")
+	v.BindEnv("security.raft_tls.key_file", "SECURITY_RAFT_TLS_KEY_FILE")
+	v.BindEnv("security.raft_tls.ca_file", "SECURITY_RAFT_TLS_CA_FILE")
 }
 
 // setProfileDefaults sets profile-specific defaults
@@ -321,6 +362,7 @@ func setCommonDefaults(v *viper.Viper) {
 	v.SetDefault("cluster.bind_addr", "127.0.0.1:7000")
 	v.SetDefault("cluster.bootstrap", true)
 	v.SetDefault("cluster.join_addr", "")
+	v.SetDefault("cluster.http_port", 8080)
 
 	// gRPC
 	v.SetDefault("grpc.master_port", 9000)
